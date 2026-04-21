@@ -138,9 +138,14 @@ def load_candidates() -> list[Profile]:
     if st.session_state.candidates is not None:
         return st.session_state.candidates
     cached = load_json(CANDIDATES_FILE, [])
-    if cached:
-        profiles = [Profile.from_dict(c) for c in cached]
-    else:
+    profiles = [Profile.from_dict(c) for c in cached] if cached else []
+    # A cache built before we added roles would default every candidate to
+    # "roomie", leaving roomies with an empty queue. Re-fetch in that case.
+    if profiles:
+        roles = {p.role for p in profiles}
+        if "host" not in roles or "roomie" not in roles:
+            profiles = []
+    if not profiles:
         try:
             profiles = fetch_candidates(30)
             save_json(CANDIDATES_FILE, [p.to_dict() for p in profiles])

@@ -172,7 +172,15 @@ class SwipeScreen(tk.Frame):
         return "host" if (me and me.role == "roomie") else "roomie"
 
     def _prepare_queue(self) -> None:
-        if not self.app.candidates:
+        # Invalidate stale caches that predate the host/roomie split. Without
+        # this, a roomie would see an empty queue forever against old data.
+        candidates = self.app.candidates
+        if candidates:
+            roles = {c.role for c in candidates}
+            if "host" not in roles or "roomie" not in roles:
+                self.app.save_candidates([])
+                candidates = []
+        if not candidates:
             self._set_status("Loading candidates from randomuser.me \u2026")
             self._disable_actions()
             threading.Thread(target=self._download_initial, daemon=True).start()
