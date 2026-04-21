@@ -18,7 +18,9 @@ import requests
 import streamlit as st
 
 from api import fetch_candidates, featured_ids
-from auth import authenticate, create_user, validate_new_credentials
+from auth import (
+    authenticate, create_user, validate_new_credentials, PASSWORD_RULES,
+)
 from chat import append_message, load_chat, maybe_canned_reply
 from models import (
     Profile, Filters, SCHEDULES, CLEANLINESS_LEVELS,
@@ -357,7 +359,11 @@ def view_auth():
     with tab_signup:
         with st.form("signup_form", clear_on_submit=False):
             u = st.text_input("Username", key="signup_u")
-            p = st.text_input("Password", type="password", key="signup_p")
+            p = st.text_input(
+                "Password", type="password", key="signup_p",
+                help=PASSWORD_RULES,
+            )
+            st.caption(PASSWORD_RULES)
             c = st.text_input("Confirm password", type="password", key="signup_c")
             submitted = st.form_submit_button("Create account", use_container_width=True)
         if submitted:
