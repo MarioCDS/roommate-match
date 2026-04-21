@@ -54,6 +54,12 @@ def featured_candidates() -> List[Profile]:
                 "Cozy two-bedroom near Oktogon. Very quiet building. Everything "
                 "works perfectly. No problems at all. You'll love it here."
             ),
-            house_photo_url="https://picsum.photos/seed/harold-room/600/400",
+            house_photo_urls=[
+                f"https://picsum.photos/seed/harold-room-{i}/600/400"
+                for i in range(4)
+            ],
+            rooms=2,
+            bathrooms=1,
+            square_meters=72,
         ),
     ]

@@ -39,7 +39,16 @@ class Profile:
     # Host-only fields. For roomies these stay at defaults and are ignored.
     rent: int = 0
     house_description: str = ""
-    house_photo_url: str = ""
+    house_photo_urls: list = None  # populated to [] in __post_init__
+    rooms: int = 0
+    bathrooms: int = 0
+    square_meters: int = 0
+
+    # Default the mutable field after initialisation (dataclasses don't allow
+    # ``list`` as a default value directly, but ``None`` lets us coerce).
+    def __post_init__(self) -> None:
+        if self.house_photo_urls is None:
+            self.house_photo_urls = []
 
     # ------- derived helpers -----------------------------------------
 
@@ -53,9 +62,13 @@ class Profile:
 
     @property
     def display_photo(self) -> str:
-        """Photo shown on swipe cards: house for hosts, face for roomies."""
-        if self.role == "host" and self.house_photo_url:
-            return self.house_photo_url
+        """Primary photo shown on a swipe card.
+
+        For hosts, the first image in the house gallery. For roomies, the
+        personal portrait. Falls back to the portrait if the gallery is empty.
+        """
+        if self.role == "host" and self.house_photo_urls:
+            return self.house_photo_urls[0]
         return self.photo_url
 
     # ------- serialisation -------------------------------------------
@@ -65,6 +78,11 @@ class Profile:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Profile":
+        # Back-compat: older profiles stored a single ``house_photo_url``;
+        # new ones carry a ``house_photo_urls`` list.
+        urls = list(d.get("house_photo_urls") or [])
+        if not urls and d.get("house_photo_url"):
+            urls = [d["house_photo_url"]]
         return cls(
             id=d["id"],
             name=d["name"],
@@ -80,7 +98,10 @@ class Profile:
             role=d.get("role", "roomie"),
             rent=d.get("rent", 0),
             house_description=d.get("house_description", ""),
-            house_photo_url=d.get("house_photo_url", ""),
+            house_photo_urls=urls,
+            rooms=d.get("rooms", 0),
+            bathrooms=d.get("bathrooms", 0),
+            square_meters=d.get("square_meters", 0),
         )
 
     @classmethod
@@ -88,8 +109,11 @@ class Profile:
         """Create a demo Profile from a randomuser.me record.
 
         Randomly assigns ``role`` so the demo pool contains both hosts and
-        roomies. Hosts get a seeded house photo (picsum.photos) and a short
-        description; roomies get a personal bio and a budget.
+        roomies. Hosts get a gallery of seeded house photos (picsum.photos)
+        and a short description; roomies get a personal bio and a budget.
+
+        The portrait comes straight from randomuser.me so the name and the
+        face actually correspond.
         """
         name = f"{d['name']['first']} {d['name']['last']}"
         uid = d["login"]["uuid"]
@@ -101,9 +125,10 @@ class Profile:
             id=uid,
             name=name,
             age=int(d["dob"]["age"]),
-            # pravatar.cc serves crisp 500x500 deterministic portraits; much
-            # better than randomuser's 128x128 large thumbnails.
-            photo_url=avatar_url(uid),
+            # Use randomuser's native portrait so the person on the card
+            # actually matches the name on the card. It's 128x128 but we
+            # display it modestly to avoid heavy upscaling.
+            photo_url=d["picture"]["large"],
             email=d["email"],
             budget=rent if is_host else random.choice(
                 [350, 400, 450, 500, 550, 600, 700, 800, 900],
@@ -116,7 +141,10 @@ class Profile:
             role=role,
             rent=rent if is_host else 0,
             house_description=random.choice(HOUSE_DESCRIPTIONS) if is_host else "",
-            house_photo_url=house_photo_url(uid) if is_host else "",
+            house_photo_urls=house_photo_gallery(uid) if is_host else [],
+            rooms=random.choice([1, 2, 2, 3, 3, 4]) if is_host else 0,
+            bathrooms=random.choice([1, 1, 1, 2]) if is_host else 0,
+            square_meters=random.choice([45, 55, 65, 70, 80, 90, 110]) if is_host else 0,
         )
 
     # ------- filtering -----------------------------------------------
@@ -167,8 +195,18 @@ def avatar_url(seed: str) -> str:
 
 
 def house_photo_url(seed: str) -> str:
-    """Deterministic 600x400 stock room photo from a seed."""
+    """Deterministic 600x400 stock room photo from a seed (single photo)."""
     return f"https://picsum.photos/seed/{seed}/600/400"
+
+
+def house_photo_gallery(seed: str, n: int = 4) -> list:
+    """A list of ``n`` deterministic 600x400 stock photos for one listing.
+
+    Each photo uses a different variant of the seed so the same listing gets
+    the same gallery every time (stable caching) but the photos look
+    different from each other.
+    """
+    return [f"https://picsum.photos/seed/{seed}-{i}/600/400" for i in range(n)]
 
 
 def compatibility(me: Profile, other: Profile) -> int:

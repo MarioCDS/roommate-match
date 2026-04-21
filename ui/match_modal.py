@@ -91,18 +91,19 @@ class MatchModal(tk.Toplevel):
         return lbl
 
     def _load(self, profile: Profile, label: tk.Label) -> None:
-        if not profile.photo_url:
+        src = profile.photo_url
+        if not src:
             return
 
-        def worker(url=profile.photo_url):
+        def worker(path=src):
             try:
-                resp = requests.get(url, timeout=8)
-                resp.raise_for_status()
-                img = (
-                    Image.open(io.BytesIO(resp.content))
-                    .convert("RGB")
-                    .resize(AVATAR_SIZE)
-                )
+                if path.startswith(("http://", "https://")):
+                    resp = requests.get(path, timeout=8)
+                    resp.raise_for_status()
+                    img = Image.open(io.BytesIO(resp.content))
+                else:
+                    img = Image.open(path)
+                img = img.convert("RGB").resize(AVATAR_SIZE)
             except (requests.RequestException, OSError):
                 return
             self.after(0, lambda i=img: self._apply(label, i))

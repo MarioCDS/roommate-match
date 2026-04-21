@@ -40,6 +40,10 @@ def filters_file(username: str) -> Path:
     return user_dir(username) / "filters.json"
 
 
+def avatar_path(username: str) -> Path:
+    return user_dir(username) / "avatar.jpg"
+
+
 def load_json(path: Path, default: Any) -> Any:
     if not path.exists():
         return default

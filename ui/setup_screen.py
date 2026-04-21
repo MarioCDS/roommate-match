@@ -3,12 +3,19 @@ from __future__ import annotations
 
 import tkinter as tk
 import uuid
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
+from pathlib import Path
+
+from PIL import Image, ImageTk
 
 from models import (
-    Profile, SCHEDULES, CLEANLINESS_LEVELS, avatar_url, house_photo_url,
+    Profile, SCHEDULES, CLEANLINESS_LEVELS, avatar_url, house_photo_gallery,
 )
-from ui.common import BG, CARD_BG, BORDER
+from storage import avatar_path
+from ui.common import BG, CARD_BG, BORDER, placeholder_image
+
+
+AVATAR_PREVIEW_SIZE = (84, 84)
 
 
 class SetupScreen(tk.Frame):
@@ -28,8 +35,6 @@ class SetupScreen(tk.Frame):
             style="TLabel", wraplength=440,
         ).pack(padx=24, pady=(0, 8), anchor="w")
 
-        # Role selector (above the form so it can dynamically rebuild the
-        # role-specific section).
         self.role_var = tk.StringVar(value=existing.role if existing else "roomie")
         role_card = tk.Frame(self, bg=CARD_BG, bd=0, highlightthickness=1,
                              highlightbackground=BORDER)
@@ -39,12 +44,12 @@ class SetupScreen(tk.Frame):
         radio_row = tk.Frame(role_card, bg=CARD_BG)
         radio_row.pack(padx=14, pady=(0, 12), anchor="w")
         ttk.Radiobutton(
-            radio_row, text="Roomie \u2014 looking for a place",
+            radio_row, text="Roomie - looking for a place",
             variable=self.role_var, value="roomie",
             command=self._rebuild_role_section,
         ).pack(side="left", padx=(0, 20))
         ttk.Radiobutton(
-            radio_row, text="Host \u2014 have a place to offer",
+            radio_row, text="Host - have a place to offer",
             variable=self.role_var, value="host",
             command=self._rebuild_role_section,
         ).pack(side="left")
@@ -52,7 +57,6 @@ class SetupScreen(tk.Frame):
         form = tk.Frame(self, bg=BG)
         form.pack(padx=24, pady=6, fill="x")
 
-        # Common field variables.
         self.name_var = tk.StringVar(value=existing.name if existing else "")
         self.age_var = tk.StringVar(value=str(existing.age) if existing else "")
         self.email_var = tk.StringVar(value=existing.email if existing else "")
@@ -64,19 +68,54 @@ class SetupScreen(tk.Frame):
         self.cleanliness_var = tk.StringVar(
             value=existing.cleanliness if existing else CLEANLINESS_LEVELS[1],
         )
-
-        # Role-specific variables. Each kept around regardless of current role
-        # so switching roles preserves the user's input.
         self.budget_var = tk.IntVar(value=existing.budget if existing else 500)
         self.rent_var = tk.IntVar(
             value=existing.rent if existing and existing.rent else 500,
         )
+        self.rooms_var = tk.IntVar(
+            value=existing.rooms if existing and existing.rooms else 2,
+        )
+        self.bathrooms_var = tk.IntVar(
+            value=existing.bathrooms if existing and existing.bathrooms else 1,
+        )
+        self.sqm_var = tk.IntVar(
+            value=existing.square_meters if existing and existing.square_meters else 60,
+        )
         self.house_desc_widget: tk.Text | None = None
 
+        # Photo state
+        self.photo_url_var = tk.StringVar(
+            value=existing.photo_url if existing else "",
+        )
+        self._avatar_preview_ref: ImageTk.PhotoImage | None = None
+
         row = 0
-        self._row(form, row, "Name", ttk.Entry(form, textvariable=self.name_var, width=34))
+        # ---- photo upload row ---------------------------------------
+        ttk.Label(form, text="Profile photo", style="TLabel").grid(
+            row=row, column=0, sticky="w", pady=6,
+        )
+        photo_row = tk.Frame(form, bg=BG)
+        photo_row.grid(row=row, column=1, sticky="w", pady=6, padx=(10, 0))
+        self.avatar_preview = tk.Label(
+            photo_row, bg=BG, bd=0, highlightthickness=1,
+            highlightbackground=BORDER,
+        )
+        self.avatar_preview.pack(side="left")
+        self._refresh_avatar_preview()
+
+        upload_col = tk.Frame(photo_row, bg=BG)
+        upload_col.pack(side="left", padx=(10, 0))
+        ttk.Button(upload_col, text="Upload\u2026",
+                   command=self._upload_photo).pack(anchor="w")
+        ttk.Button(upload_col, text="Use default",
+                   command=self._use_default_avatar).pack(anchor="w", pady=(4, 0))
         row += 1
-        self._row(form, row, "Age", ttk.Entry(form, textvariable=self.age_var, width=10))
+
+        self._row(form, row, "Name",
+                  ttk.Entry(form, textvariable=self.name_var, width=34))
+        row += 1
+        self._row(form, row, "Age",
+                  ttk.Entry(form, textvariable=self.age_var, width=10))
         row += 1
         self._row(form, row, "Email",
                   ttk.Entry(form, textvariable=self.email_var, width=34))
@@ -111,13 +150,11 @@ class SetupScreen(tk.Frame):
         )
         row += 1
 
-        # Role-specific section (rebuilt on role change).
         self.role_section = tk.Frame(form, bg=BG)
         self.role_section.grid(row=row, column=0, columnspan=2, sticky="ew",
                                pady=(10, 4))
         row += 1
 
-        # Bio (multi-line, shared by both roles).
         ttk.Label(form, text="Bio", style="TLabel").grid(
             row=row, column=0, sticky="nw", pady=6,
         )
@@ -143,6 +180,59 @@ class SetupScreen(tk.Frame):
                 side="left", padx=6,
             )
 
+    # --- photo handling ----------------------------------------------
+
+    def _upload_photo(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Choose a profile photo",
+            filetypes=[("Images", "*.jpg *.jpeg *.png"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            img = Image.open(path).convert("RGB")
+        except OSError:
+            messagebox.showerror("Upload failed", "Could not read that image.")
+            return
+        # Crop to a square centred on the shorter side, then resize to 500.
+        w, h = img.size
+        side = min(w, h)
+        img = img.crop(((w - side) // 2, (h - side) // 2,
+                       (w + side) // 2, (h + side) // 2)).resize((500, 500))
+        user = self.app.current_user
+        if not user:
+            messagebox.showerror("Not logged in", "Log in before uploading a photo.")
+            return
+        dest = avatar_path(user)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        img.save(dest, format="JPEG", quality=90)
+        self.photo_url_var.set(str(dest))
+        self._refresh_avatar_preview()
+
+    def _use_default_avatar(self) -> None:
+        existing = self.app.my_profile
+        pid = existing.id if existing else "preview"
+        self.photo_url_var.set(avatar_url(pid))
+        self._refresh_avatar_preview()
+
+    def _refresh_avatar_preview(self) -> None:
+        url = self.photo_url_var.get()
+        letter = (self.name_var.get()[:1] if self.name_var.get() else "?").upper()
+        try:
+            if url and Path(url).exists():
+                img = Image.open(url).convert("RGB").resize(AVATAR_PREVIEW_SIZE)
+                self._avatar_preview_ref = ImageTk.PhotoImage(img)
+            else:
+                # Remote or unset: show a placeholder; real load happens later.
+                self._avatar_preview_ref = placeholder_image(
+                    letter, AVATAR_PREVIEW_SIZE, 40,
+                )
+        except OSError:
+            self._avatar_preview_ref = placeholder_image(
+                letter, AVATAR_PREVIEW_SIZE, 40,
+            )
+        self.avatar_preview.configure(image=self._avatar_preview_ref)
+
     # --- role section ------------------------------------------------
 
     def _rebuild_role_section(self) -> None:
@@ -162,12 +252,32 @@ class SetupScreen(tk.Frame):
                 variable=self.rent_var, length=260, bg=BG, highlightthickness=0,
             ).grid(row=1, column=0, sticky="w")
 
+            # Rooms / bathrooms / square meters on one row.
+            specs = tk.Frame(parent, bg=BG)
+            specs.grid(row=2, column=0, sticky="w", pady=(12, 4))
+            ttk.Label(specs, text="Bedrooms", style="TLabel").grid(row=0, column=0,
+                                                                    sticky="w")
+            tk.Spinbox(specs, from_=1, to=8, width=4,
+                       textvariable=self.rooms_var).grid(row=1, column=0,
+                                                         sticky="w", padx=(0, 14))
+            ttk.Label(specs, text="Bathrooms", style="TLabel").grid(row=0, column=1,
+                                                                     sticky="w")
+            tk.Spinbox(specs, from_=1, to=5, width=4,
+                       textvariable=self.bathrooms_var).grid(row=1, column=1,
+                                                              sticky="w",
+                                                              padx=(0, 14))
+            ttk.Label(specs, text="Size (m\u00b2)", style="TLabel").grid(row=0,
+                                                                          column=2,
+                                                                          sticky="w")
+            tk.Spinbox(specs, from_=20, to=400, increment=5, width=6,
+                       textvariable=self.sqm_var).grid(row=1, column=2, sticky="w")
+
             ttk.Label(parent, text="About the place", style="H2.TLabel").grid(
-                row=2, column=0, sticky="w", pady=(10, 2),
+                row=3, column=0, sticky="w", pady=(10, 2),
             )
             hd_wrap = tk.Frame(parent, bg=BORDER, bd=0, highlightthickness=1,
                                highlightbackground=BORDER)
-            hd_wrap.grid(row=3, column=0, sticky="w")
+            hd_wrap.grid(row=4, column=0, sticky="w")
             self.house_desc_widget = tk.Text(
                 hd_wrap, width=40, height=4, wrap="word",
                 font=("Segoe UI", 10), relief="flat", bd=4, bg=CARD_BG,
@@ -179,10 +289,9 @@ class SetupScreen(tk.Frame):
 
             ttk.Label(
                 parent,
-                text="Your photo is auto-generated. The swipe card will show "
-                "a stock photo for the place.",
+                text="A gallery of 4 stock room photos is attached automatically.",
                 style="TLabel", foreground="#6B7280", wraplength=400,
-            ).grid(row=4, column=0, sticky="w", pady=(8, 0))
+            ).grid(row=5, column=0, sticky="w", pady=(8, 0))
         else:
             ttk.Label(parent, text="Your budget (\u20ac/mo)",
                       style="H2.TLabel").grid(row=0, column=0, sticky="w",
@@ -220,7 +329,7 @@ class SetupScreen(tk.Frame):
 
         existing = self.app.my_profile
         pid = existing.id if existing else str(uuid.uuid4())
-        photo = existing.photo_url if existing and existing.photo_url else avatar_url(pid)
+        photo = self.photo_url_var.get() or avatar_url(pid)
 
         if role == "host":
             rent = int(self.rent_var.get())
@@ -228,10 +337,10 @@ class SetupScreen(tk.Frame):
             if self.house_desc_widget is not None:
                 house_desc = self.house_desc_widget.get("1.0", "end-1c").strip()
             house_desc = house_desc or "Comfortable place."
-            hphoto = (
-                existing.house_photo_url
-                if existing and existing.house_photo_url
-                else house_photo_url(pid)
+            gallery = (
+                list(existing.house_photo_urls)
+                if existing and existing.house_photo_urls
+                else house_photo_gallery(pid)
             )
             profile = Profile(
                 id=pid, name=name, age=age, photo_url=photo, email=email,
@@ -240,7 +349,10 @@ class SetupScreen(tk.Frame):
                 pets=bool(self.pets_var.get()),
                 cleanliness=self.cleanliness_var.get(),
                 role="host", rent=rent,
-                house_description=house_desc, house_photo_url=hphoto,
+                house_description=house_desc, house_photo_urls=gallery,
+                rooms=int(self.rooms_var.get()),
+                bathrooms=int(self.bathrooms_var.get()),
+                square_meters=int(self.sqm_var.get()),
             )
         else:
             budget = int(self.budget_var.get())
@@ -251,7 +363,7 @@ class SetupScreen(tk.Frame):
                 pets=bool(self.pets_var.get()),
                 cleanliness=self.cleanliness_var.get(),
                 role="roomie", rent=0,
-                house_description="", house_photo_url="",
+                house_description="", house_photo_urls=[],
             )
 
         self.app.save_my_profile(profile)

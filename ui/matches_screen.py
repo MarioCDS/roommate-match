@@ -88,9 +88,13 @@ class MatchesScreen(tk.Frame):
 
     def _load_thumb(self, url: str, label: tk.Label) -> None:
         try:
-            resp = requests.get(url, timeout=8)
-            resp.raise_for_status()
-            img = Image.open(io.BytesIO(resp.content)).convert("RGB").resize(THUMB_SIZE)
+            if url.startswith(("http://", "https://")):
+                resp = requests.get(url, timeout=8)
+                resp.raise_for_status()
+                img = Image.open(io.BytesIO(resp.content))
+            else:
+                img = Image.open(url)
+            img = img.convert("RGB").resize(THUMB_SIZE)
         except (requests.RequestException, OSError):
             return
         self.after(0, lambda i=img: self._apply_thumb(label, i))

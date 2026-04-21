@@ -1,7 +1,7 @@
 """Core swipe screen.
 
 Shows one candidate of the *opposite* role at a time:
-- A roomie sees host listings (house photo + description + rent).
+- A roomie sees host listings (house photo carousel + description + rent).
 - A host sees roomie profiles (face + bio + budget).
 """
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk, messagebox
 
 import requests
@@ -19,8 +20,20 @@ from models import Profile, compatibility
 from ui.common import BG, CARD_BG, TEXT, MUTED, PRIMARY, placeholder_image
 from ui.match_modal import MatchModal
 
-PORTRAIT_SIZE = (300, 300)
+PORTRAIT_SIZE = (220, 220)     # closer to randomuser's native 128 to avoid heavy upscaling
 HOUSE_SIZE = (360, 240)
+
+
+def _load_image(src: str, size: tuple[int, int], timeout: float = 8.0) -> Image.Image:
+    """Open an image from either a local path or an http(s) URL."""
+    if src.startswith(("http://", "https://")):
+        resp = requests.get(src, timeout=timeout)
+        resp.raise_for_status()
+        data = io.BytesIO(resp.content)
+        img = Image.open(data)
+    else:
+        img = Image.open(src)
+    return img.convert("RGB").resize(size)
 
 
 class SwipeScreen(tk.Frame):
@@ -32,6 +45,7 @@ class SwipeScreen(tk.Frame):
         self.queue: list[Profile] = []
         self.index = 0
         self._last_action: tuple[str, Profile] | None = None
+        self._gallery_index = 0  # which photo within the current host's gallery
 
         self._build()
         self._prepare_queue()
@@ -50,8 +64,29 @@ class SwipeScreen(tk.Frame):
         )
         self.badge_label.pack(pady=(14, 6))
 
-        self.photo_label = tk.Label(self.card, bg=CARD_BG)
-        self.photo_label.pack(pady=(0, 10), anchor="center")
+        photo_row = tk.Frame(self.card, bg=CARD_BG)
+        photo_row.pack(pady=(0, 4))
+        self.prev_photo_btn = tk.Button(
+            photo_row, text="\u25c0", bd=0, relief="flat",
+            bg=CARD_BG, activebackground="#E5E7EB",
+            font=("Segoe UI", 14, "bold"),
+            cursor="hand2", padx=6, command=self._prev_photo,
+        )
+        self.prev_photo_btn.pack(side="left", padx=(0, 4))
+        self.photo_label = tk.Label(photo_row, bg=CARD_BG)
+        self.photo_label.pack(side="left")
+        self.next_photo_btn = tk.Button(
+            photo_row, text="\u25b6", bd=0, relief="flat",
+            bg=CARD_BG, activebackground="#E5E7EB",
+            font=("Segoe UI", 14, "bold"),
+            cursor="hand2", padx=6, command=self._next_photo,
+        )
+        self.next_photo_btn.pack(side="left", padx=(4, 0))
+
+        self.photo_index_label = tk.Label(
+            self.card, text="", bg=CARD_BG, fg=MUTED, font=("Segoe UI", 8),
+        )
+        self.photo_index_label.pack(pady=(0, 6))
 
         self.name_label = tk.Label(self.card, text="", bg=CARD_BG, fg=TEXT,
                                    font=("Segoe UI", 18, "bold"))
@@ -197,9 +232,10 @@ class SwipeScreen(tk.Frame):
 
         p = self.queue[self.index]
         me = self.app.my_profile
+        self._gallery_index = 0  # reset photo index for the new candidate
 
         if p.role == "host":
-            self.badge_label.configure(text="\U0001f3e0  HOST LISTING")
+            self.badge_label.configure(text="HOST LISTING")
             price_txt = f"\u20ac{p.rent}/mo rent"
             self.bio_label.configure(text=p.house_description or "(no description)")
         else:
@@ -216,13 +252,22 @@ class SwipeScreen(tk.Frame):
 
         smoker_txt = "smoker" if p.smoker else "non-smoker"
         pets_txt = "pets ok" if p.pets else "no pets"
-        self.meta_label.configure(
-            text=(
-                f"{price_txt}  \u2022  {p.schedule}  \u2022  {p.cleanliness}\n"
-                f"{smoker_txt}  \u2022  {pets_txt}"
-            ),
-        )
+        meta_lines = [
+            f"{price_txt}  \u2022  {p.schedule}  \u2022  {p.cleanliness}",
+            f"{smoker_txt}  \u2022  {pets_txt}",
+        ]
+        if p.role == "host" and (p.rooms or p.bathrooms or p.square_meters):
+            parts = []
+            if p.rooms:
+                parts.append(f"{p.rooms} bed")
+            if p.bathrooms:
+                parts.append(f"{p.bathrooms} bath")
+            if p.square_meters:
+                parts.append(f"{p.square_meters} m\u00b2")
+            meta_lines.insert(1, "  \u2022  ".join(parts))
+        self.meta_label.configure(text="\n".join(meta_lines))
         self._set_status("")
+        self._update_gallery_controls(p)
         self._load_photo_async(p)
 
     def _show_empty(self, msg: str) -> None:
@@ -234,40 +279,81 @@ class SwipeScreen(tk.Frame):
         self.score_label.configure(text="")
         self.meta_label.configure(text="")
         self.bio_label.configure(text=msg)
+        self.photo_index_label.configure(text="")
+        self.prev_photo_btn.configure(state="disabled")
+        self.next_photo_btn.configure(state="disabled")
         self._set_status("")
         self._disable_actions()
 
     # --- photo loading ------------------------------------------------
 
+    def _current_photo_url(self, profile: Profile) -> str:
+        if profile.role == "host" and profile.house_photo_urls:
+            idx = self._gallery_index % len(profile.house_photo_urls)
+            return profile.house_photo_urls[idx]
+        return profile.photo_url
+
     def _load_photo_async(self, profile: Profile) -> None:
         size = HOUSE_SIZE if profile.role == "host" else PORTRAIT_SIZE
-        # Show a placeholder first so we never flash the previous image.
-        initial = "\U0001f3e0" if profile.role == "host" else profile.name[:1].upper()
-        # PIL can't render emoji with default fonts reliably, so use letter placeholder.
         placeholder_letter = "H" if profile.role == "host" else profile.name[:1].upper()
         self._photo_ref = placeholder_image(placeholder_letter, size, 100)
         self.photo_label.configure(image=self._photo_ref)
 
-        url = profile.display_photo
+        url = self._current_photo_url(profile)
         if not url:
             return
+        expected_state = (profile.id, self._gallery_index)
 
-        def worker(expected_id=profile.id, u=url, sz=size):
+        def worker(u=url, sz=size, state=expected_state):
             try:
-                resp = requests.get(u, timeout=8)
-                resp.raise_for_status()
-                img = Image.open(io.BytesIO(resp.content)).convert("RGB").resize(sz)
+                img = _load_image(u, sz)
             except (requests.RequestException, OSError):
                 return
-            self.after(0, lambda i=img, pid=expected_id: self._set_photo(pid, i))
+            self.after(0, lambda i=img, s=state: self._set_photo(s, i))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _set_photo(self, expected_id: str, pil_image: Image.Image) -> None:
-        if self.index >= len(self.queue) or self.queue[self.index].id != expected_id:
-            return  # user already swiped past this one
+    def _set_photo(self, expected_state, pil_image: Image.Image) -> None:
+        if self.index >= len(self.queue):
+            return
+        current = (self.queue[self.index].id, self._gallery_index)
+        if current != expected_state:
+            return  # user already swiped past this one or changed photo
         self._photo_ref = ImageTk.PhotoImage(pil_image)
         self.photo_label.configure(image=self._photo_ref)
+
+    # --- gallery ------------------------------------------------------
+
+    def _prev_photo(self) -> None:
+        if self.index >= len(self.queue):
+            return
+        p = self.queue[self.index]
+        if p.role != "host" or len(p.house_photo_urls) < 2:
+            return
+        self._gallery_index = (self._gallery_index - 1) % len(p.house_photo_urls)
+        self._update_gallery_controls(p)
+        self._load_photo_async(p)
+
+    def _next_photo(self) -> None:
+        if self.index >= len(self.queue):
+            return
+        p = self.queue[self.index]
+        if p.role != "host" or len(p.house_photo_urls) < 2:
+            return
+        self._gallery_index = (self._gallery_index + 1) % len(p.house_photo_urls)
+        self._update_gallery_controls(p)
+        self._load_photo_async(p)
+
+    def _update_gallery_controls(self, profile: Profile) -> None:
+        if profile.role == "host" and len(profile.house_photo_urls) > 1:
+            n = len(profile.house_photo_urls)
+            self.photo_index_label.configure(text=f"{self._gallery_index + 1} / {n}")
+            self.prev_photo_btn.configure(state="normal")
+            self.next_photo_btn.configure(state="normal")
+        else:
+            self.photo_index_label.configure(text="")
+            self.prev_photo_btn.configure(state="disabled")
+            self.next_photo_btn.configure(state="disabled")
 
     # --- actions ------------------------------------------------------
 

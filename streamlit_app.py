@@ -23,12 +23,12 @@ from api import fetch_candidates
 from auth import authenticate, create_user, validate_new_credentials
 from models import (
     Profile, Filters, SCHEDULES, CLEANLINESS_LEVELS,
-    avatar_url, house_photo_url, compatibility,
+    avatar_url, house_photo_gallery, compatibility,
 )
 from storage import (
     load_json, save_json,
     CANDIDATES_FILE,
-    profile_file, matches_file, filters_file,
+    profile_file, matches_file, filters_file, avatar_path,
 )
 
 SMOKER_OPTS = ["any", "no smokers", "smokers only"]
@@ -121,6 +121,7 @@ def init_state() -> None:
         "show_match": False,          # open match modal on next render
         "matched_profile": None,      # candidate to show in the modal
         "last_action": None,          # ("like" | "pass", Profile) for undo
+        "gallery_idx": 0,             # photo index within the current listing
     }
     for k, v in defaults.items():
         st.session_state.setdefault(k, v)
@@ -325,6 +326,32 @@ def view_setup() -> None:
         horizontal=True,
     )
 
+    # Profile photo preview + uploader (outside the form so the preview
+    # can update immediately when a new file is picked).
+    st.markdown("**Profile photo**")
+    preview_col, upload_col = st.columns([1, 3])
+    with preview_col:
+        current_photo = existing.photo_url if existing and existing.photo_url else None
+        if current_photo:
+            try:
+                st.image(current_photo, width=96)
+            except Exception:
+                st.image(avatar_url(existing.id if existing else "preview"), width=96)
+        else:
+            st.image(avatar_url("preview"), width=96)
+    with upload_col:
+        uploaded = st.file_uploader(
+            "Upload a square-ish photo (jpg/png)",
+            type=["jpg", "jpeg", "png"],
+            key="avatar_uploader",
+        )
+        use_default = st.checkbox(
+            "Use an auto-generated avatar instead",
+            value=not (existing and existing.photo_url
+                       and not str(existing.photo_url).startswith(("http://", "https://"))),
+            help="Tick this if you'd rather let the app pick a stock avatar.",
+        )
+
     with st.form("setup_form"):
         name = st.text_input("Name", value=existing.name if existing else "")
         col_age, col_email = st.columns([1, 2])
@@ -362,11 +389,29 @@ def view_setup() -> None:
                 value=(existing.rent if existing and existing.rent else 500),
                 step=25,
             )
+            spec_cols = st.columns(3)
+            with spec_cols[0]:
+                rooms = st.number_input(
+                    "Bedrooms", min_value=1, max_value=8, step=1,
+                    value=(existing.rooms if existing and existing.rooms else 2),
+                )
+            with spec_cols[1]:
+                bathrooms = st.number_input(
+                    "Bathrooms", min_value=1, max_value=5, step=1,
+                    value=(existing.bathrooms
+                           if existing and existing.bathrooms else 1),
+                )
+            with spec_cols[2]:
+                square_meters = st.number_input(
+                    "Size (m\u00b2)", min_value=15, max_value=500, step=5,
+                    value=(existing.square_meters
+                           if existing and existing.square_meters else 60),
+                )
             house_description = st.text_area(
                 "About the place",
                 value=existing.house_description if existing else "",
                 height=140,
-                placeholder="Describe the apartment: neighborhood, rooms, amenities, vibe.",
+                placeholder="Describe the apartment: neighborhood, amenities, vibe.",
             )
             budget = rent
         else:
@@ -375,6 +420,9 @@ def view_setup() -> None:
                 value=existing.budget if existing else 500, step=25,
             )
             rent = 0
+            rooms = 0
+            bathrooms = 0
+            square_meters = 0
             house_description = ""
 
         bio = st.text_area(
@@ -394,16 +442,30 @@ def view_setup() -> None:
             st.error("Please enter your name.")
             return
         pid = existing.id if existing else str(uuid.uuid4())
-        photo = existing.photo_url if existing and existing.photo_url else avatar_url(pid)
+
+        # Resolve the profile photo URL: a fresh upload > existing value >
+        # auto-generated pravatar.
+        if uploaded is not None and not use_default:
+            photo = _save_uploaded_avatar(
+                uploaded, st.session_state.current_user,
+            ) or avatar_url(pid)
+        elif use_default:
+            photo = avatar_url(pid)
+        else:
+            photo = (
+                existing.photo_url if existing and existing.photo_url
+                else avatar_url(pid)
+            )
+
         if role == "host":
-            hphoto = (
-                existing.house_photo_url
-                if existing and existing.house_photo_url
-                else house_photo_url(pid)
+            gallery = (
+                list(existing.house_photo_urls)
+                if existing and existing.house_photo_urls
+                else house_photo_gallery(pid)
             )
             hdesc = house_description.strip() or "Comfortable place."
         else:
-            hphoto = ""
+            gallery = []
             hdesc = ""
         p = Profile(
             id=pid,
@@ -420,10 +482,37 @@ def view_setup() -> None:
             role=role,
             rent=int(rent),
             house_description=hdesc,
-            house_photo_url=hphoto,
+            house_photo_urls=gallery,
+            rooms=int(rooms),
+            bathrooms=int(bathrooms),
+            square_meters=int(square_meters),
         )
         save_my_profile(p)
         go("filters" if existing is None else "swipe")
+
+
+def _save_uploaded_avatar(uploaded, username: str) -> str | None:
+    """Resize the uploaded image to a 500x500 square and save it to disk.
+
+    Returns the resulting path on success, otherwise None.
+    """
+    if not username:
+        return None
+    try:
+        from PIL import Image as _PILImage
+        img = _PILImage.open(uploaded).convert("RGB")
+    except Exception:
+        return None
+    w, h = img.size
+    side = min(w, h)
+    img = img.crop(
+        ((w - side) // 2, (h - side) // 2,
+         (w + side) // 2, (h + side) // 2),
+    ).resize((500, 500))
+    dest = avatar_path(username)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dest, format="JPEG", quality=90)
+    return str(dest)
 
 
 def view_filters() -> None:
@@ -510,7 +599,12 @@ def view_swipe() -> None:
     score = compatibility(me, p) if me else None
     is_host = p.role == "host"
 
-    badge = "\U0001f3e0 HOST LISTING" if is_host else "\U0001f464 LOOKING FOR A PLACE"
+    # Reset the photo gallery index when we move to a different candidate.
+    if st.session_state.get("gallery_for") != p.id:
+        st.session_state.gallery_idx = 0
+        st.session_state.gallery_for = p.id
+
+    badge = "HOST LISTING" if is_host else "LOOKING FOR A PLACE"
     st.markdown(
         f"<div style='display:inline-block;background:#4F46E5;color:white;"
         f"padding:2px 10px;border-radius:6px;font-size:0.8rem;"
@@ -518,22 +612,38 @@ def view_swipe() -> None:
         unsafe_allow_html=True,
     )
 
-    display_photo = p.house_photo_url if is_host else p.photo_url
     description = p.house_description if is_host else p.bio
     price_txt = (
         f"\u20ac{p.rent}/month rent" if is_host else f"\u20ac{p.budget}/month budget"
     )
 
     with st.container(border=True):
-        if display_photo:
-            if is_host:
-                # House photo fills the card width.
-                st.image(display_photo, use_container_width=True)
-            else:
-                # Person photo centred with padding on either side.
-                left, mid, right = st.columns([1, 2, 1])
-                with mid:
-                    st.image(display_photo, use_container_width=True)
+        if is_host and p.house_photo_urls:
+            n = len(p.house_photo_urls)
+            gi = st.session_state.gallery_idx % n
+            st.image(p.house_photo_urls[gi], use_container_width=True)
+            if n > 1:
+                nav_cols = st.columns([1, 2, 1])
+                with nav_cols[0]:
+                    if st.button("\u25c0", key=f"gprev_{p.id}",
+                                 use_container_width=True):
+                        st.session_state.gallery_idx = (gi - 1) % n
+                        st.rerun()
+                with nav_cols[1]:
+                    st.markdown(
+                        f"<div style='text-align:center;opacity:0.7;"
+                        f"padding-top:0.3rem'>{gi + 1} / {n}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with nav_cols[2]:
+                    if st.button("\u25b6", key=f"gnext_{p.id}",
+                                 use_container_width=True):
+                        st.session_state.gallery_idx = (gi + 1) % n
+                        st.rerun()
+        elif p.photo_url:
+            left, mid, right = st.columns([1, 2, 1])
+            with mid:
+                st.image(p.photo_url, use_container_width=True)
 
         head_cols = st.columns([3, 1])
         head_cols[0].subheader(f"{p.name}, {p.age}")
@@ -544,6 +654,17 @@ def view_swipe() -> None:
                 f"{score}% match</div>",
                 unsafe_allow_html=True,
             )
+
+        # Property specs line (hosts only).
+        if is_host and (p.rooms or p.bathrooms or p.square_meters):
+            specs = []
+            if p.rooms:
+                specs.append(f"{p.rooms} bed")
+            if p.bathrooms:
+                specs.append(f"{p.bathrooms} bath")
+            if p.square_meters:
+                specs.append(f"{p.square_meters} m\u00b2")
+            st.caption("  \u2022  ".join(specs))
 
         smoker_txt = "smoker" if p.smoker else "non-smoker"
         pets_txt = "pets ok" if p.pets else "no pets"
