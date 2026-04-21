@@ -100,6 +100,12 @@ st.markdown("""
         font-weight: 600;
         padding: 0.35rem 0.6rem;
     }
+    /* Streamlit shows a small "Press Enter to submit form" hint under every
+       text input inside a form. The submit button makes it obvious, so we
+       hide it to declutter the password field layout. */
+    div[data-testid="InputInstructions"] {
+        display: none;
+    }
     .match-title {
         color: #4F46E5;
         font-size: 2rem;
