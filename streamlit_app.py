@@ -19,7 +19,7 @@ import uuid
 import requests
 import streamlit as st
 
-from api import fetch_candidates
+from api import fetch_candidates, featured_ids
 from auth import authenticate, create_user, validate_new_credentials
 from chat import append_message, load_chat, maybe_canned_reply
 from models import (
@@ -181,6 +181,10 @@ def build_queue() -> list[Profile]:
     # Best matches first, using the compatibility score.
     if me is not None:
         queue.sort(key=lambda c: compatibility(me, c), reverse=True)
+    # Pin featured candidates (Harold and friends) to the front so they're
+    # easy to find regardless of the user's preferences.
+    featured = featured_ids()
+    queue.sort(key=lambda c: 0 if c.id in featured else 1)
     st.session_state.queue = queue
     st.session_state.queue_index = 0
     return queue

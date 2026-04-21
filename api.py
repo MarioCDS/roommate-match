@@ -26,6 +26,11 @@ def fetch_candidates(n: int = 30, timeout: float = 10.0) -> List[Profile]:
     return featured_candidates() + api_profiles
 
 
+def featured_ids() -> set[str]:
+    """IDs of hand-picked candidates that should always surface first."""
+    return {c.id for c in featured_candidates()}
+
+
 def featured_candidates() -> List[Profile]:
     """Always-present seeded candidates mixed into the demo pool."""
     return [

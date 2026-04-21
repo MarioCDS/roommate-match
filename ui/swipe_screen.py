@@ -15,7 +15,7 @@ from tkinter import ttk, messagebox
 import requests
 from PIL import Image, ImageTk
 
-from api import fetch_candidates
+from api import fetch_candidates, featured_ids
 from models import Profile, compatibility
 from ui.common import BG, CARD_BG, TEXT, MUTED, PRIMARY, placeholder_image
 from ui.match_modal import MatchModal
@@ -230,6 +230,10 @@ class SwipeScreen(tk.Frame):
         ]
         if me is not None:
             queue.sort(key=lambda c: compatibility(me, c), reverse=True)
+        # Pin featured candidates (Harold and friends) to the front so they
+        # always appear near the start of the queue.
+        featured = featured_ids()
+        queue.sort(key=lambda c: 0 if c.id in featured else 1)
         self.queue = queue
         self.index = 0
         self._last_action = None
