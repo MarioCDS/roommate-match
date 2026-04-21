@@ -5,12 +5,8 @@ a list of messages. A message is a plain dict::
 
     {"from": "me" | "them", "text": str, "ts": ISO-8601 string}
 """
-from __future__ import annotations
-
 import random
 from datetime import datetime
-from pathlib import Path
-from typing import List
 
 from storage import load_json, save_json, user_dir
 
@@ -36,21 +32,19 @@ CANNED_REPLIES = [
 ]
 
 
-def chat_file(username: str, peer_id: str) -> Path:
-    return user_dir(username) / "chats" / f"{peer_id}.json"
+def chat_file(username, peer_id):
+    return user_dir(username) / "chats" / (peer_id + ".json")
 
 
-def load_chat(username: str, peer_id: str) -> List[dict]:
+def load_chat(username, peer_id):
     return load_json(chat_file(username, peer_id), [])
 
 
-def save_chat(username: str, peer_id: str, messages: List[dict]) -> None:
+def save_chat(username, peer_id, messages):
     save_json(chat_file(username, peer_id), messages)
 
 
-def append_message(
-    username: str, peer_id: str, from_side: str, text: str,
-) -> dict:
+def append_message(username, peer_id, from_side, text):
     msg = {
         "from": from_side,
         "text": text,
@@ -62,13 +56,8 @@ def append_message(
     return msg
 
 
-def maybe_canned_reply(reply_chance: float = 0.75) -> str | None:
-    """Return a canned reply from the other side, or None.
-
-    The matched profile isn't a real user, so replies are picked from a
-    fixed pool. Caller decides when to invoke (typically right after the
-    local user sends a message).
-    """
+def maybe_canned_reply(reply_chance=0.75):
+    """Return a canned reply from the other side, or None."""
     if random.random() > reply_chance:
         return None
     return random.choice(CANNED_REPLIES)

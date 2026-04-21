@@ -1,54 +1,45 @@
 """JSON persistence helpers.
 
-Paths are rooted next to the .exe (frozen) or next to this file (dev).
-User-scoped files live under data/users/<username>/ so multiple accounts
-can coexist with separate profiles and matches.
+Paths are rooted next to this file, under a data/ folder. User-scoped files
+live under data/users/<username>/ so multiple accounts coexist with separate
+profiles, matches, chats, and uploaded images.
 """
-from __future__ import annotations
-
 import json
-import sys
 from pathlib import Path
-from typing import Any
 
-if getattr(sys, "frozen", False):
-    # Running from a PyInstaller bundle: store data next to the .exe.
-    BASE_DIR = Path(sys.executable).parent
-else:
-    BASE_DIR = Path(__file__).parent
-
+BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 
-# Shared across all accounts
+# Shared across all accounts.
 USERS_FILE = DATA_DIR / "users.json"
 CANDIDATES_FILE = DATA_DIR / "candidates.json"
 
 
-def user_dir(username: str) -> Path:
+def user_dir(username):
     return DATA_DIR / "users" / username
 
 
-def profile_file(username: str) -> Path:
+def profile_file(username):
     return user_dir(username) / "profile.json"
 
 
-def matches_file(username: str) -> Path:
+def matches_file(username):
     return user_dir(username) / "matches.json"
 
 
-def filters_file(username: str) -> Path:
+def filters_file(username):
     return user_dir(username) / "filters.json"
 
 
-def avatar_path(username: str) -> Path:
+def avatar_path(username):
     return user_dir(username) / "avatar.jpg"
 
 
-def house_photo_path(username: str, index: int) -> Path:
-    return user_dir(username) / f"house_{index}.jpg"
+def house_photo_path(username, index):
+    return user_dir(username) / ("house_" + str(index) + ".jpg")
 
 
-def load_json(path: Path, default: Any) -> Any:
+def load_json(path, default):
     if not path.exists():
         return default
     try:
@@ -58,7 +49,7 @@ def load_json(path: Path, default: Any) -> Any:
         return default
 
 
-def save_json(path: Path, data: Any) -> None:
+def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

@@ -1,8 +1,9 @@
-"""randomuser.me client for seeding roommate candidates."""
-from __future__ import annotations
+"""randomuser.me client for seeding roommate candidates.
 
-from typing import List
-
+The fetch_candidates() function always prepends our featured profiles
+(see ``featured_candidates``) so there is at least one familiar face in
+the demo pool.
+"""
 import requests
 
 from models import Profile, house_photo_gallery
@@ -10,28 +11,28 @@ from models import Profile, house_photo_gallery
 API_URL = "https://randomuser.me/api/"
 
 
-def fetch_candidates(n: int = 30, timeout: float = 10.0) -> List[Profile]:
+def fetch_candidates(n=30, timeout=10.0):
     """Fetch n random users and wrap them as Profile objects.
-
-    The returned list always starts with our hand-picked featured candidates
-    (see ``featured_candidates``) so there is at least one familiar face in
-    the demo pool.
 
     Raises requests.RequestException on network failure.
     """
-    resp = requests.get(API_URL, params={"results": n, "nat": "us,gb,es,fr,de,br"}, timeout=timeout)
+    resp = requests.get(
+        API_URL,
+        params={"results": n, "nat": "us,gb,es,fr,de,br"},
+        timeout=timeout,
+    )
     resp.raise_for_status()
     data = resp.json()
     api_profiles = [Profile.from_randomuser(u) for u in data.get("results", [])]
     return featured_candidates() + api_profiles
 
 
-def featured_ids() -> set[str]:
+def featured_ids():
     """IDs of hand-picked candidates that should always surface first."""
     return {c.id for c in featured_candidates()}
 
 
-def featured_candidates() -> List[Profile]:
+def featured_candidates():
     """Always-present seeded candidates mixed into the demo pool."""
     return [
         Profile(

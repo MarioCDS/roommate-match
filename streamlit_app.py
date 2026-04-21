@@ -12,8 +12,6 @@ Note: Streamlit Cloud's filesystem is ephemeral, so user data and matches persis
 only while the server is warm. For an MVP demo this is fine; for production
 you'd swap storage.py for a real database.
 """
-from __future__ import annotations
-
 import uuid
 
 import requests
@@ -111,7 +109,7 @@ st.markdown("""
 # Session state helpers
 # --------------------------------------------------------------------
 
-def init_state() -> None:
+def init_state():
     defaults = {
         "view": "auth",
         "current_user": None,
@@ -131,12 +129,12 @@ def init_state() -> None:
         st.session_state.setdefault(k, v)
 
 
-def go(view: str) -> None:
+def go(view):
     st.session_state.view = view
     st.rerun()
 
 
-def load_candidates() -> list[Profile]:
+def load_candidates():
     if st.session_state.candidates is not None:
         return st.session_state.candidates
     cached = load_json(CANDIDATES_FILE, [])
@@ -167,7 +165,7 @@ def load_candidates() -> list[Profile]:
     return profiles
 
 
-def build_queue() -> list[Profile]:
+def build_queue():
     candidates = load_candidates()
     matched_ids = {m.id for m in st.session_state.matches}
     me = st.session_state.my_profile
@@ -194,7 +192,7 @@ def build_queue() -> list[Profile]:
 # Auth flow
 # --------------------------------------------------------------------
 
-def login(username: str) -> None:
+def login(username):
     st.session_state.current_user = username
     my = load_json(profile_file(username), None)
     st.session_state.my_profile = Profile.from_dict(my) if my else None
@@ -207,7 +205,7 @@ def login(username: str) -> None:
     go("setup" if st.session_state.my_profile is None else "swipe")
 
 
-def signup_and_login(username: str) -> None:
+def signup_and_login(username):
     st.session_state.current_user = username
     st.session_state.my_profile = None
     st.session_state.matches = []
@@ -217,7 +215,7 @@ def signup_and_login(username: str) -> None:
     go("setup")
 
 
-def logout() -> None:
+def logout():
     st.session_state.current_user = None
     st.session_state.my_profile = None
     st.session_state.matches = []
@@ -231,13 +229,13 @@ def logout() -> None:
 # User-scoped state mutations
 # --------------------------------------------------------------------
 
-def save_my_profile(profile: Profile) -> None:
+def save_my_profile(profile):
     u = st.session_state.current_user
     st.session_state.my_profile = profile
     save_json(profile_file(u), profile.to_dict())
 
 
-def add_match(profile: Profile) -> None:
+def add_match(profile):
     u = st.session_state.current_user
     if not any(m.id == profile.id for m in st.session_state.matches):
         st.session_state.matches.append(profile)
@@ -246,7 +244,7 @@ def add_match(profile: Profile) -> None:
         st.session_state.matched_profile = profile
 
 
-def remove_match(profile: Profile) -> None:
+def remove_match(profile):
     u = st.session_state.current_user
     st.session_state.matches = [
         m for m in st.session_state.matches if m.id != profile.id
@@ -254,7 +252,7 @@ def remove_match(profile: Profile) -> None:
     save_json(matches_file(u), [m.to_dict() for m in st.session_state.matches])
 
 
-def save_filters(f: Filters) -> None:
+def save_filters(f):
     u = st.session_state.current_user
     st.session_state.filters = f
     save_json(filters_file(u), f.to_dict())
@@ -266,7 +264,7 @@ def save_filters(f: Filters) -> None:
 # Views
 # --------------------------------------------------------------------
 
-def render_nav() -> None:
+def render_nav():
     if not st.session_state.current_user:
         return
     st.markdown(
@@ -290,7 +288,7 @@ def render_nav() -> None:
     st.markdown("---")
 
 
-def view_auth() -> None:
+def view_auth():
     st.markdown("<div class='roomie-brand'>\U0001f3e0 NOVA Roomie</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='roomie-subtitle'>Find a roommate who fits your vibe.</div>",
@@ -330,7 +328,7 @@ def view_auth() -> None:
                 signup_and_login(username)
 
 
-def view_setup() -> None:
+def view_setup():
     existing = st.session_state.my_profile
     st.title("Your profile" if existing else "Welcome! Create your profile")
     st.caption("This info is shown to other people when they swipe on you.")
@@ -539,7 +537,7 @@ def view_setup() -> None:
         go("filters" if existing is None else "swipe")
 
 
-def _save_uploaded_house_photos(files, username: str) -> list[str]:
+def _save_uploaded_house_photos(files, username):
     """Crop to 3:2, resize to 600x400, and save each uploaded file.
 
     Returns the list of on-disk paths (strings). Silently skips files that
@@ -552,7 +550,7 @@ def _save_uploaded_house_photos(files, username: str) -> list[str]:
     except ImportError:
         return []
 
-    saved: list[str] = []
+    saved = []
     for i, uploaded in enumerate(files[:MAX_HOUSE_PHOTOS]):
         try:
             img = _PILImage.open(uploaded).convert("RGB")
@@ -577,7 +575,7 @@ def _save_uploaded_house_photos(files, username: str) -> list[str]:
     return saved
 
 
-def _save_uploaded_avatar(uploaded, username: str) -> str | None:
+def _save_uploaded_avatar(uploaded, username):
     """Resize the uploaded image to a 500x500 square and save it to disk.
 
     Returns the resulting path on success, otherwise None.
@@ -601,7 +599,7 @@ def _save_uploaded_avatar(uploaded, username: str) -> str | None:
     return str(dest)
 
 
-def view_filters() -> None:
+def view_filters():
     st.title("Your preferences")
     st.caption("Filter candidates before you swipe. Leave as \u201cany\u201d to see everyone.")
     f = st.session_state.filters
@@ -647,7 +645,7 @@ def view_filters() -> None:
         go("swipe")
 
 
-def view_swipe() -> None:
+def view_swipe():
     st.title("Swipe")
 
     # Trigger the match dialog when add_match() has queued one. Clear the flag
@@ -809,7 +807,7 @@ def view_swipe() -> None:
                 st.error(f"Network error: {e}")
 
 
-def view_matches() -> None:
+def view_matches():
     matches = st.session_state.matches
     me = st.session_state.my_profile
     st.title(f"Your matches ({len(matches)})")
@@ -831,7 +829,7 @@ def view_matches() -> None:
     elif sort_by == "Compatibility" and me is not None:
         sorted_matches.sort(key=lambda m: compatibility(me, m), reverse=True)
     elif sort_by == "Budget (low to high)":
-        sorted_matches.sort(key=lambda m: m.effective_price)
+        sorted_matches.sort(key=lambda m: m.effective_price())
     elif sort_by == "Name":
         sorted_matches.sort(key=lambda m: m.name.lower())
     elif sort_by == "Age":
@@ -879,7 +877,7 @@ def view_matches() -> None:
                     go("chat")
 
 
-def view_chat() -> None:
+def view_chat():
     peer = st.session_state.chat_peer
     me_user = st.session_state.current_user
     if peer is None or not me_user:
@@ -938,7 +936,7 @@ def view_chat() -> None:
 
 
 @st.dialog("It's a Match!")
-def _show_match_dialog(my: Profile | None, other: Profile) -> None:
+def _show_match_dialog(my, other):
     other_first = other.name.split()[0] if other.name else "them"
     st.markdown(
         f"<div class='match-sub'>You and <b>{other_first}</b> could make "

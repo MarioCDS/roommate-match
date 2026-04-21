@@ -1,57 +1,61 @@
 # NOVA Roomie
 
-A roommate-matching swipe app built for NOVA's Introduction to Programming group project.
-Ships in **two forms** from the same shared codebase (`models.py`, `auth.py`, `api.py`, `storage.py`):
+A web app for NOVA's Introduction to Programming group project. Two-sided
+roommate marketplace with a Tinder-style swipe flow:
 
-- **Desktop** (Tkinter): run `py main.py` or double-click `dist/NOVA_Roomie.exe`.
-- **Web** (Streamlit): run `streamlit run streamlit_app.py`, or deploy to Streamlit Cloud (see `DEPLOY.md`).
+- **Roomies** look for a place. They swipe on host listings.
+- **Hosts** have a place to offer. They swipe on roomie profiles.
 
-## Requirements
+Every right-swipe is treated as a match. Matches have a per-pair chat with
+canned replies from the other side (it's a demo with no real backend).
 
-- **Python 3.13+** (tested on Python 3.14)
-- Internet connection on first launch (to fetch demo profiles from `randomuser.me`)
-
-## Setup
-
-From this folder (`roommate-match`):
+## Run locally
 
 ```bash
-py -m venv .venv
-.venv\Scripts\activate
 pip install -r requirements.txt
+streamlit run streamlit_app.py
 ```
 
-## Run
+The app opens at http://localhost:8501.
 
-```bash
-py main.py
-```
+## Deploy
+
+See `DEPLOY.md`. Short version: push to GitHub, point Streamlit Community
+Cloud at `streamlit_app.py`, done.
 
 ## What it does
 
-1. **First launch**: fill out your own profile (name, age, budget, smoker, schedule, bio).
-2. **Pick preferences**: filter by max budget, smoker, and schedule.
-3. **Swipe**: for each candidate shown, press **Like** or **Pass**.
-4. **Matches**: everyone you liked appears in the Matches tab with their contact email.
+1. **Sign up** with a username + password (mock auth, SHA-256 hashed).
+2. **Create your profile**: name, age, email, budget/rent, schedule,
+   cleanliness, smoker, pets, bio. Hosts also give bedroom / bathroom /
+   area counts, a description of the flat, and optionally upload photos.
+3. **Pick preferences** (max budget, smoker, schedule, pets, cleanliness).
+4. **Swipe** through candidates of the opposite role. Host cards show a
+   gallery you can browse with prev/next arrows. Each card has a
+   compatibility score computed from budget + lifestyle fit.
+5. **Match modal** appears when you like someone.
+6. **Matches tab** lists everyone you've liked, sortable by recency /
+   compatibility / budget / name / age.
+7. **Chat** opens a per-match thread with canned replies.
 
-All state persists to `data/*.json` between runs.
+All state persists to `data/*.json` between runs (locally — Streamlit Cloud
+wipes it on container restart).
 
 ## Project layout
 
 ```
-main.py          app entry point + Tk App class
-models.py        Profile and Filters dataclasses
-storage.py       JSON load/save helpers
-api.py           randomuser.me client
-ui/
-  setup_screen.py
-  filter_screen.py
-  swipe_screen.py
-  matches_screen.py
-data/            runtime JSON (created on first use)
+streamlit_app.py   Streamlit UI
+models.py          Profile, Filters, compatibility(), photo helpers
+auth.py            Mock SHA-256 login/signup
+api.py             randomuser.me client + featured candidates (Harold)
+chat.py            Per-match chat threads
+storage.py         JSON file helpers
+data/              Runtime JSON + uploaded images (created on first run)
 ```
 
 ## Notes
 
-Because there is only one real user, every right-swipe is treated as a mutual match.
-A production version would need a backend to implement real two-way matching.
+- External APIs used: `randomuser.me` for demo profiles, `i.pravatar.cc`
+  for default avatars, `images.unsplash.com` for curated interior photos.
+- Because only one real user exists per browser session, every like
+  counts as a match. A production version would need a real backend.

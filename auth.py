@@ -4,8 +4,6 @@ NOT PRODUCTION. There is no salt, no rate limiting, no password-strength
 enforcement. The goal is only to demonstrate a login/signup flow for the
 university project.
 """
-from __future__ import annotations
-
 import hashlib
 
 from storage import USERS_FILE, load_json, save_json
@@ -14,39 +12,39 @@ MIN_USERNAME_LEN = 3
 MIN_PASSWORD_LEN = 4
 
 
-def _hash(password: str) -> str:
+def _hash(password):
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
-def load_users() -> dict[str, str]:
+def load_users():
     return load_json(USERS_FILE, {})
 
 
-def save_users(users: dict[str, str]) -> None:
+def save_users(users):
     save_json(USERS_FILE, users)
 
 
-def authenticate(username: str, password: str) -> bool:
+def authenticate(username, password):
     users = load_users()
     stored = users.get(username)
     return stored is not None and stored == _hash(password)
 
 
-def validate_new_credentials(username: str, password: str, confirm: str) -> str | None:
+def validate_new_credentials(username, password, confirm):
     """Return an error message, or None if the inputs are acceptable."""
     username = username.strip()
     if len(username) < MIN_USERNAME_LEN:
-        return f"Username must be at least {MIN_USERNAME_LEN} characters."
+        return "Username must be at least " + str(MIN_USERNAME_LEN) + " characters."
     if not username.replace("_", "").isalnum():
         return "Username can only contain letters, numbers, and underscores."
     if len(password) < MIN_PASSWORD_LEN:
-        return f"Password must be at least {MIN_PASSWORD_LEN} characters."
+        return "Password must be at least " + str(MIN_PASSWORD_LEN) + " characters."
     if password != confirm:
         return "Passwords do not match."
     return None
 
 
-def create_user(username: str, password: str) -> bool:
+def create_user(username, password):
     """Create a new account. Returns False if the username is already taken."""
     users = load_users()
     if username in users:
