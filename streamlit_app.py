@@ -145,7 +145,16 @@ def load_candidates() -> list[Profile]:
     # "roomie", leaving roomies with an empty queue. Re-fetch in that case.
     if profiles:
         roles = {p.role for p in profiles}
-        if "host" not in roles or "roomie" not in roles:
+        stale = (
+            "host" not in roles
+            or "roomie" not in roles
+            or any(
+                "picsum.photos" in u
+                for p in profiles
+                for u in p.house_photo_urls
+            )
+        )
+        if stale:
             profiles = []
     if not profiles:
         try:

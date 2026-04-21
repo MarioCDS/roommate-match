@@ -5,7 +5,7 @@ from typing import List
 
 import requests
 
-from models import Profile
+from models import Profile, house_photo_gallery
 
 API_URL = "https://randomuser.me/api/"
 
@@ -54,10 +54,7 @@ def featured_candidates() -> List[Profile]:
                 "Cozy two-bedroom near Oktogon. Very quiet building. Everything "
                 "works perfectly. No problems at all. You'll love it here."
             ),
-            house_photo_urls=[
-                f"https://picsum.photos/seed/harold-room-{i}/600/400"
-                for i in range(4)
-            ],
+            house_photo_urls=house_photo_gallery("harold-arato"),
             rooms=2,
             bathrooms=1,
             square_meters=72,

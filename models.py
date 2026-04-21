@@ -194,19 +194,63 @@ def avatar_url(seed: str) -> str:
     return f"https://i.pravatar.cc/500?u={seed}"
 
 
+# Curated Unsplash photo IDs of apartment / interior shots. Using a fixed
+# list keeps the demo pool looking like homes rather than the landscapes
+# that picsum.photos tends to return. Each Profile picks ``n`` consecutive
+# entries from a deterministic offset so the same listing always gets the
+# same gallery.
+_INTERIOR_PHOTO_IDS = [
+    "photo-1522708323590-d24dbb6b0267",   # modern living room
+    "photo-1560448204-e02f11c3d0e2",      # bedroom
+    "photo-1502672260266-1c1ef2d93688",   # kitchen
+    "photo-1484154218962-a197022b5858",   # open-plan kitchen
+    "photo-1493663284031-b7e3aefcae8e",   # dining area
+    "photo-1586023492125-27b2c045efd7",   # bathroom
+    "photo-1556909114-f6e7ad7d3136",      # living room with couch
+    "photo-1505693416388-ac5ce068fe85",   # bedroom grey
+    "photo-1555854877-bab0e564b8d5",      # kitchen and dining
+    "photo-1513584684374-8bab748fbf90",   # living area
+    "photo-1540518614846-7eded433c457",   # minimalist living
+    "photo-1524758631624-e2822e304c36",   # apartment living
+    "photo-1598928506311-c55ded91a20c",   # cosy corner
+    "photo-1586105251261-72a756497a11",   # modern bathroom
+    "photo-1521783988139-893ce4f7ed71",   # bedroom
+    "photo-1534595038511-9f219fe0c979",   # sofa scene
+]
+
+
+def _unsplash_url(photo_id: str) -> str:
+    return (
+        f"https://images.unsplash.com/{photo_id}"
+        "?w=600&h=400&fit=crop&auto=format"
+    )
+
+
+def _gallery_offset(seed: str) -> int:
+    import hashlib
+    digest = hashlib.md5(seed.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % len(_INTERIOR_PHOTO_IDS)
+
+
 def house_photo_url(seed: str) -> str:
-    """Deterministic 600x400 stock room photo from a seed (single photo)."""
-    return f"https://picsum.photos/seed/{seed}/600/400"
+    """Deterministic 600x400 apartment-interior stock photo for one listing."""
+    idx = _gallery_offset(seed)
+    return _unsplash_url(_INTERIOR_PHOTO_IDS[idx])
 
 
 def house_photo_gallery(seed: str, n: int = 4) -> list:
-    """A list of ``n`` deterministic 600x400 stock photos for one listing.
+    """A list of ``n`` deterministic 600x400 interior photos for one listing.
 
-    Each photo uses a different variant of the seed so the same listing gets
-    the same gallery every time (stable caching) but the photos look
-    different from each other.
+    The photos are picked consecutively from the curated list starting at an
+    offset hashed from ``seed``, so (a) the same listing is stable across
+    runs and (b) two different listings usually look different.
     """
-    return [f"https://picsum.photos/seed/{seed}-{i}/600/400" for i in range(n)]
+    offset = _gallery_offset(seed)
+    urls = []
+    for i in range(n):
+        pid = _INTERIOR_PHOTO_IDS[(offset + i) % len(_INTERIOR_PHOTO_IDS)]
+        urls.append(_unsplash_url(pid))
+    return urls
 
 
 def compatibility(me: Profile, other: Profile) -> int:

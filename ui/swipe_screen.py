@@ -179,7 +179,16 @@ class SwipeScreen(tk.Frame):
         candidates = self.app.candidates
         if candidates:
             roles = {c.role for c in candidates}
-            if "host" not in roles or "roomie" not in roles:
+            stale = (
+                "host" not in roles
+                or "roomie" not in roles
+                or any(
+                    "picsum.photos" in u
+                    for c in candidates
+                    for u in c.house_photo_urls
+                )
+            )
+            if stale:
                 self.app.save_candidates([])
                 candidates = []
         if not candidates:
