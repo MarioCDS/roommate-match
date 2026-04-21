@@ -22,6 +22,7 @@ from auth import authenticate, create_user, validate_new_credentials
 from chat import append_message, load_chat, maybe_canned_reply
 from models import (
     Profile, Filters, SCHEDULES, CLEANLINESS_LEVELS,
+    LEASE_OPTIONS, NEIGHBORHOODS,
     avatar_url, house_photo_gallery, compatibility,
 )
 from storage import (
@@ -36,6 +37,8 @@ SMOKER_OPTS = ["any", "no smokers", "smokers only"]
 SCHEDULE_OPTS = ["any"] + SCHEDULES
 PETS_OPTS = ["any", "has pets", "no pets"]
 CLEANLINESS_OPTS = ["any"] + CLEANLINESS_LEVELS
+NEIGHBORHOOD_OPTS = ["any"] + list(NEIGHBORHOODS.keys())
+NEIGHBORHOOD_NAMES = list(NEIGHBORHOODS.keys())
 
 st.set_page_config(
     page_title="NOVA Roomie",
@@ -274,9 +277,10 @@ def render_nav():
         f"</div>",
         unsafe_allow_html=True,
     )
-    cols = st.columns(5)
+    cols = st.columns(6)
     labels_cmds = [
         ("Swipe", lambda: go("swipe")),
+        ("Map", lambda: go("map")),
         ("Matches", lambda: go("matches")),
         ("Filters", lambda: go("filters")),
         ("Profile", lambda: go("setup")),
@@ -430,11 +434,60 @@ def view_setup():
                     value=(existing.square_meters
                            if existing and existing.square_meters else 60),
                 )
+            nb_cols = st.columns([2, 1])
+            with nb_cols[0]:
+                # Default to the existing neighborhood if set, else Alvalade.
+                nb_default = (
+                    existing.neighborhood
+                    if existing and existing.neighborhood in NEIGHBORHOOD_NAMES
+                    else NEIGHBORHOOD_NAMES[0]
+                )
+                neighborhood = st.selectbox(
+                    "Neighborhood", NEIGHBORHOOD_NAMES,
+                    index=NEIGHBORHOOD_NAMES.index(nb_default),
+                )
+            with nb_cols[1]:
+                # Choose a lease length in months.
+                lease_default = (
+                    existing.lease_months
+                    if existing and existing.lease_months in LEASE_OPTIONS
+                    else 12
+                )
+                lease_months = st.selectbox(
+                    "Lease (months)", LEASE_OPTIONS,
+                    index=LEASE_OPTIONS.index(lease_default),
+                )
+
+            from datetime import date
+            mid_default = date.today()
+            if existing and existing.move_in_date:
+                try:
+                    from datetime import datetime
+                    mid_default = datetime.fromisoformat(existing.move_in_date).date()
+                except ValueError:
+                    pass
+            move_in_date = st.date_input(
+                "Available from", value=mid_default,
+                min_value=date.today(),
+            )
+
+            amen_cols = st.columns(2)
+            with amen_cols[0]:
+                utilities_included = st.checkbox(
+                    "Utilities included (water/electric/internet)",
+                    value=bool(existing.utilities_included) if existing else True,
+                )
+            with amen_cols[1]:
+                furnished = st.checkbox(
+                    "Furnished",
+                    value=bool(existing.furnished) if existing else True,
+                )
+
             house_description = st.text_area(
                 "About the place",
                 value=existing.house_description if existing else "",
                 height=140,
-                placeholder="Describe the apartment: neighborhood, amenities, vibe.",
+                placeholder="Describe the apartment: amenities, vibe, who you'd like as a roomie.",
             )
             house_photos = st.file_uploader(
                 f"Photos of the place (up to {MAX_HOUSE_PHOTOS})",
@@ -465,6 +518,11 @@ def view_setup():
             square_meters = 0
             house_description = ""
             house_photos = None
+            neighborhood = ""
+            lease_months = 0
+            move_in_date = None
+            utilities_included = False
+            furnished = False
 
         bio = st.text_area(
             "Bio",
@@ -516,6 +574,9 @@ def view_setup():
         else:
             gallery = []
             hdesc = ""
+        mid_iso = ""
+        if role == "host" and move_in_date:
+            mid_iso = move_in_date.isoformat()
         p = Profile(
             id=pid,
             name=name.strip(),
@@ -535,6 +596,11 @@ def view_setup():
             rooms=int(rooms),
             bathrooms=int(bathrooms),
             square_meters=int(square_meters),
+            neighborhood=neighborhood,
+            move_in_date=mid_iso,
+            lease_months=int(lease_months) if lease_months else 0,
+            utilities_included=bool(utilities_included),
+            furnished=bool(furnished),
         )
         save_my_profile(p)
         go("filters" if existing is None else "swipe")
@@ -635,6 +701,17 @@ def view_filters():
                 index=CLEANLINESS_OPTS.index(f.cleanliness_pref),
             )
 
+        # Neighborhood filter only tightens the queue for roomies, since only
+        # host listings carry a neighborhood. Hosts can leave it as "any".
+        nb_index = (
+            NEIGHBORHOOD_OPTS.index(f.neighborhood_pref)
+            if f.neighborhood_pref in NEIGHBORHOOD_OPTS else 0
+        )
+        neighborhood_pref = st.selectbox(
+            "Neighborhood preference (only affects roomies browsing listings)",
+            NEIGHBORHOOD_OPTS, index=nb_index,
+        )
+
         submitted = st.form_submit_button("Start swiping", use_container_width=True)
 
     if submitted:
@@ -644,6 +721,7 @@ def view_filters():
             schedule_pref=schedule_pref,
             pets_pref=pets_pref,
             cleanliness_pref=cleanliness_pref,
+            neighborhood_pref=neighborhood_pref,
         ))
         go("swipe")
 
@@ -763,7 +841,23 @@ def view_swipe():
                 specs.append(f"{p.bathrooms} bath")
             if p.square_meters:
                 specs.append(f"{p.square_meters} m\u00b2")
+            if p.neighborhood:
+                specs.append(p.neighborhood)
             st.caption("  \u2022  ".join(specs))
+
+        # Lease terms line (hosts only): move-in date, lease length, amenities.
+        if is_host:
+            terms = []
+            if p.move_in_date:
+                terms.append(f"Available {p.move_in_date}")
+            if p.lease_months:
+                terms.append(f"{p.lease_months}-month lease")
+            if p.utilities_included:
+                terms.append("Utilities included")
+            if p.furnished:
+                terms.append("Furnished")
+            if terms:
+                st.caption("  \u2022  ".join(terms))
 
         smoker_txt = "smoker" if p.smoker else "non-smoker"
         pets_txt = "pets ok" if p.pets else "no pets"
@@ -887,6 +981,10 @@ def view_matches():
                              use_container_width=True):
                     st.session_state.chat_peer = m
                     go("chat")
+                if st.button("Unmatch", key=f"unmatch_{m.id}",
+                             use_container_width=True):
+                    remove_match(m)
+                    st.rerun()
 
 
 def view_chat():
@@ -947,6 +1045,56 @@ def view_chat():
             st.rerun()
 
 
+def view_map():
+    st.title("Listings on the map", anchor=False)
+    st.caption(
+        "Each host listing is plotted at its neighborhood's approximate "
+        "location. Use this to get a feel for where rooms are."
+    )
+
+    # Make sure we have candidates. If the queue hasn't been built yet (user
+    # went straight to Map after login) trigger a fetch.
+    if st.session_state.candidates is None:
+        with st.spinner("Loading candidates..."):
+            load_candidates()
+
+    candidates = st.session_state.candidates or []
+    hosts = [
+        c for c in candidates
+        if c.role == "host" and c.neighborhood in NEIGHBORHOODS
+    ]
+    if not hosts:
+        st.info("No host listings with mapped neighborhoods yet.")
+        if st.button("Go to Swipe", type="primary"):
+            go("swipe")
+        return
+
+    # Build a DataFrame with lat/lon columns; st.map picks them up automatically.
+    import pandas as pd
+    rows = []
+    for h in hosts:
+        lat, lon = NEIGHBORHOODS[h.neighborhood]
+        rows.append({
+            "lat": lat,
+            "lon": lon,
+            "name": h.name,
+            "neighborhood": h.neighborhood,
+            "rent": h.rent,
+        })
+    df = pd.DataFrame(rows)
+    st.map(df, size=40, use_container_width=True)
+
+    # Summary table grouped by neighborhood.
+    st.subheader("Listings by neighborhood", anchor=False)
+    counts = {}
+    for h in hosts:
+        counts[h.neighborhood] = counts.get(h.neighborhood, 0) + 1
+    # Sort by count desc for readability.
+    for nb, n in sorted(counts.items(), key=lambda x: -x[1]):
+        label = "listing" if n == 1 else "listings"
+        st.markdown(f"- **{nb}**: {n} {label}")
+
+
 @st.dialog("It's a Match!")
 def _show_match_dialog(my, other):
     other_first = other.name.split()[0] if other.name else "them"
@@ -986,5 +1134,6 @@ VIEWS = {
     "swipe": view_swipe,
     "matches": view_matches,
     "chat": view_chat,
+    "map": view_map,
 }
 VIEWS[st.session_state.view]()

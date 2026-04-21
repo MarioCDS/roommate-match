@@ -17,6 +17,25 @@ from dataclasses import dataclass, field, asdict
 SCHEDULES = ["early bird", "night owl", "flexible"]
 CLEANLINESS_LEVELS = ["very tidy", "tidy", "relaxed"]
 ROLES = ["roomie", "host"]
+LEASE_OPTIONS = [1, 3, 6, 12, 24]
+
+# Lisbon neighborhoods we know about. The coords are approximate but good
+# enough for st.map. Kept as a plain dict so the intro-level iteration
+# patterns (for name in NEIGHBORHOODS) work as expected.
+NEIGHBORHOODS = {
+    "Alvalade": (38.7516, -9.1443),
+    "Arroios": (38.7353, -9.1355),
+    "Campo de Ourique": (38.7213, -9.1646),
+    "Saldanha": (38.7351, -9.1457),
+    "Benfica": (38.7531, -9.2011),
+    "Cais do Sodre": (38.7064, -9.1449),
+    "Marques de Pombal": (38.7253, -9.1494),
+    "Bairro Alto": (38.7137, -9.1447),
+    "Chiado": (38.7097, -9.1427),
+    "Parque das Nacoes": (38.7684, -9.0958),
+    "Belem": (38.6981, -9.2060),
+    "Lumiar": (38.7718, -9.1593),
+}
 
 
 @dataclass
@@ -41,6 +60,11 @@ class Profile:
     rooms: int = 0
     bathrooms: int = 0
     square_meters: int = 0
+    neighborhood: str = ""
+    move_in_date: str = ""       # ISO string, e.g. "2026-06-01"
+    lease_months: int = 0
+    utilities_included: bool = False
+    furnished: bool = False
 
     # --- helpers ----------------------------------------------------
 
@@ -70,6 +94,11 @@ class Profile:
         if f.pets_pref == "has pets" and not self.pets:
             return False
         if f.cleanliness_pref != "any" and self.cleanliness != f.cleanliness_pref:
+            return False
+        # Neighborhood filter only applies to profiles that actually have one
+        # (i.e. host listings). Roomies have no neighborhood so we skip.
+        if (f.neighborhood_pref != "any" and self.neighborhood
+                and self.neighborhood != f.neighborhood_pref):
             return False
         return True
 
@@ -103,6 +132,14 @@ class Profile:
             rooms = random.choice([1, 2, 2, 3, 3, 4])
             bathrooms = random.choice([1, 1, 1, 2])
             sqm = random.choice([45, 55, 65, 70, 80, 90, 110])
+            neighborhood = random.choice(list(NEIGHBORHOODS.keys()))
+            # A move-in date in the next 1-90 days, weekdays mostly.
+            from datetime import date, timedelta
+            move_in = date.today() + timedelta(days=random.randint(7, 90))
+            move_in_date = move_in.isoformat()
+            lease_months = random.choice(LEASE_OPTIONS)
+            utilities_included = random.random() < 0.55
+            furnished = random.random() < 0.65
         else:
             budget = random.choice([350, 400, 450, 500, 550, 600, 700, 800, 900])
             gallery = []
@@ -110,6 +147,11 @@ class Profile:
             rooms = 0
             bathrooms = 0
             sqm = 0
+            neighborhood = ""
+            move_in_date = ""
+            lease_months = 0
+            utilities_included = False
+            furnished = False
 
         return cls(
             id=uid,
@@ -130,6 +172,11 @@ class Profile:
             rooms=rooms,
             bathrooms=bathrooms,
             square_meters=sqm,
+            neighborhood=neighborhood,
+            move_in_date=move_in_date,
+            lease_months=lease_months,
+            utilities_included=utilities_included,
+            furnished=furnished,
         )
 
 
@@ -140,6 +187,7 @@ class Filters:
     schedule_pref: str = "any"        # "any" | one of SCHEDULES
     pets_pref: str = "any"            # "any" | "has pets" | "no pets"
     cleanliness_pref: str = "any"     # "any" | one of CLEANLINESS_LEVELS
+    neighborhood_pref: str = "any"    # "any" | name from NEIGHBORHOODS
 
     def to_dict(self):
         return asdict(self)

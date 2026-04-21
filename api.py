@@ -64,5 +64,10 @@ def featured_candidates():
             rooms=2,
             bathrooms=1,
             square_meters=72,
+            neighborhood="Alvalade",
+            move_in_date="2026-05-20",
+            lease_months=12,
+            utilities_included=True,
+            furnished=True,
         ),
     ]
