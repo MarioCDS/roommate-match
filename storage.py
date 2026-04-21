@@ -44,6 +44,10 @@ def avatar_path(username: str) -> Path:
     return user_dir(username) / "avatar.jpg"
 
 
+def house_photo_path(username: str, index: int) -> Path:
+    return user_dir(username) / f"house_{index}.jpg"
+
+
 def load_json(path: Path, default: Any) -> Any:
     if not path.exists():
         return default

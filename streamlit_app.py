@@ -28,8 +28,10 @@ from models import (
 from storage import (
     load_json, save_json,
     CANDIDATES_FILE,
-    profile_file, matches_file, filters_file, avatar_path,
+    profile_file, matches_file, filters_file, avatar_path, house_photo_path,
 )
+
+MAX_HOUSE_PHOTOS = 6
 
 SMOKER_OPTS = ["any", "no smokers", "smokers only"]
 SCHEDULE_OPTS = ["any"] + SCHEDULES
@@ -413,6 +415,23 @@ def view_setup() -> None:
                 height=140,
                 placeholder="Describe the apartment: neighborhood, amenities, vibe.",
             )
+            house_photos = st.file_uploader(
+                f"Photos of the place (up to {MAX_HOUSE_PHOTOS})",
+                type=["jpg", "jpeg", "png"],
+                accept_multiple_files=True,
+                key="house_uploader",
+                help="Leave empty to keep existing photos (or get stock photos on first save).",
+            )
+            # Show what's currently attached so the host can see what viewers see.
+            if existing and existing.house_photo_urls:
+                st.caption("Currently attached:")
+                thumb_cols = st.columns(min(4, len(existing.house_photo_urls)))
+                for i, url in enumerate(existing.house_photo_urls[:4]):
+                    with thumb_cols[i % len(thumb_cols)]:
+                        try:
+                            st.image(url, use_container_width=True)
+                        except Exception:
+                            st.caption("(preview unavailable)")
             budget = rent
         else:
             budget = st.slider(
@@ -424,6 +443,7 @@ def view_setup() -> None:
             bathrooms = 0
             square_meters = 0
             house_description = ""
+            house_photos = None
 
         bio = st.text_area(
             "Bio",
@@ -458,11 +478,19 @@ def view_setup() -> None:
             )
 
         if role == "host":
-            gallery = (
-                list(existing.house_photo_urls)
-                if existing and existing.house_photo_urls
-                else house_photo_gallery(pid)
-            )
+            if house_photos:
+                saved = _save_uploaded_house_photos(
+                    house_photos, st.session_state.current_user,
+                )
+                gallery = saved or (
+                    list(existing.house_photo_urls)
+                    if existing and existing.house_photo_urls
+                    else house_photo_gallery(pid)
+                )
+            elif existing and existing.house_photo_urls:
+                gallery = list(existing.house_photo_urls)
+            else:
+                gallery = house_photo_gallery(pid)
             hdesc = house_description.strip() or "Comfortable place."
         else:
             gallery = []
@@ -489,6 +517,44 @@ def view_setup() -> None:
         )
         save_my_profile(p)
         go("filters" if existing is None else "swipe")
+
+
+def _save_uploaded_house_photos(files, username: str) -> list[str]:
+    """Crop to 3:2, resize to 600x400, and save each uploaded file.
+
+    Returns the list of on-disk paths (strings). Silently skips files that
+    Pillow can't open.
+    """
+    if not username or not files:
+        return []
+    try:
+        from PIL import Image as _PILImage
+    except ImportError:
+        return []
+
+    saved: list[str] = []
+    for i, uploaded in enumerate(files[:MAX_HOUSE_PHOTOS]):
+        try:
+            img = _PILImage.open(uploaded).convert("RGB")
+        except Exception:
+            continue
+        w, h = img.size
+        target_ratio = 600 / 400
+        ratio = w / h
+        if ratio > target_ratio:
+            new_w = int(h * target_ratio)
+            left = (w - new_w) // 2
+            img = img.crop((left, 0, left + new_w, h))
+        else:
+            new_h = int(w / target_ratio)
+            top = (h - new_h) // 2
+            img = img.crop((0, top, w, top + new_h))
+        img = img.resize((600, 400))
+        dest = house_photo_path(username, i)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        img.save(dest, format="JPEG", quality=88)
+        saved.append(str(dest))
+    return saved
 
 
 def _save_uploaded_avatar(uploaded, username: str) -> str | None:

@@ -11,8 +11,10 @@ from PIL import Image, ImageTk
 from models import (
     Profile, SCHEDULES, CLEANLINESS_LEVELS, avatar_url, house_photo_gallery,
 )
-from storage import avatar_path
+from storage import avatar_path, house_photo_path
 from ui.common import BG, CARD_BG, BORDER, placeholder_image
+
+MAX_HOUSE_PHOTOS = 6
 
 
 AVATAR_PREVIEW_SIZE = (84, 84)
@@ -82,6 +84,16 @@ class SetupScreen(tk.Frame):
             value=existing.square_meters if existing and existing.square_meters else 60,
         )
         self.house_desc_widget: tk.Text | None = None
+
+        # House photo state: start with whatever the existing profile has so
+        # the user can preview what's attached; uploads replace this list.
+        self.house_photos: list[str] = (
+            list(existing.house_photo_urls)
+            if existing and existing.house_photo_urls else []
+        )
+        self.house_photo_widgets: list[tk.Label] = []
+        self._house_thumb_refs: list[ImageTk.PhotoImage] = []
+        self.house_photos_container: tk.Frame | None = None
 
         # Photo state
         self.photo_url_var = tk.StringVar(
@@ -239,7 +251,83 @@ class SetupScreen(tk.Frame):
         for child in self.role_section.winfo_children():
             child.destroy()
         self.house_desc_widget = None
+        self.house_photos_container = None
         self._render_role_fields()
+
+    # --- house photo upload ------------------------------------------
+
+    def _upload_house_photos(self) -> None:
+        user = self.app.current_user
+        if not user:
+            messagebox.showerror("Not logged in", "Log in before uploading photos.")
+            return
+        paths = filedialog.askopenfilenames(
+            title="Pick up to 6 photos of the place",
+            filetypes=[("Images", "*.jpg *.jpeg *.png"), ("All files", "*.*")],
+        )
+        if not paths:
+            return
+        paths = list(paths)[:MAX_HOUSE_PHOTOS]
+        saved: list[str] = []
+        for i, src in enumerate(paths):
+            try:
+                img = Image.open(src).convert("RGB")
+            except OSError:
+                continue
+            # Target 600x400 landscape. Crop centred 3:2 first, then resize.
+            w, h = img.size
+            target_ratio = 600 / 400
+            ratio = w / h
+            if ratio > target_ratio:
+                new_w = int(h * target_ratio)
+                left = (w - new_w) // 2
+                img = img.crop((left, 0, left + new_w, h))
+            else:
+                new_h = int(w / target_ratio)
+                top = (h - new_h) // 2
+                img = img.crop((0, top, w, top + new_h))
+            img = img.resize((600, 400))
+            dest = house_photo_path(user, i)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            img.save(dest, format="JPEG", quality=88)
+            saved.append(str(dest))
+        if not saved:
+            messagebox.showerror("Upload failed", "Could not read those images.")
+            return
+        self.house_photos = saved
+        self._render_house_thumbs()
+
+    def _clear_house_photos(self) -> None:
+        self.house_photos = []
+        self._render_house_thumbs()
+
+    def _render_house_thumbs(self) -> None:
+        if self.house_photos_container is None:
+            return
+        for child in self.house_photos_container.winfo_children():
+            child.destroy()
+        self._house_thumb_refs = []
+        if not self.house_photos:
+            tk.Label(
+                self.house_photos_container,
+                text="(no photos yet \u2014 stock photos will be used)",
+                bg=BG, fg="#6B7280", font=("Segoe UI", 9, "italic"),
+            ).pack(anchor="w")
+            return
+        for src in self.house_photos:
+            try:
+                if src.startswith(("http://", "https://")):
+                    # Remote thumbnails not rendered in setup to avoid network
+                    # hits; show a placeholder instead.
+                    thumb = placeholder_image("\U0001f3e0", (72, 48), 20)
+                else:
+                    img = Image.open(src).convert("RGB").resize((72, 48))
+                    thumb = ImageTk.PhotoImage(img)
+            except OSError:
+                thumb = placeholder_image("?", (72, 48), 20)
+            self._house_thumb_refs.append(thumb)
+            tk.Label(self.house_photos_container, image=thumb, bg=BG,
+                     bd=0).pack(side="left", padx=(0, 4))
 
     def _render_role_fields(self) -> None:
         parent = self.role_section
@@ -287,11 +375,31 @@ class SetupScreen(tk.Frame):
             if existing and existing.house_description:
                 self.house_desc_widget.insert("1.0", existing.house_description)
 
+            ttk.Label(parent, text="House photos", style="H2.TLabel").grid(
+                row=5, column=0, sticky="w", pady=(14, 2),
+            )
+            self.house_photos_container = tk.Frame(parent, bg=BG)
+            self.house_photos_container.grid(row=6, column=0, sticky="w")
+            self._render_house_thumbs()
+
+            photo_btns = tk.Frame(parent, bg=BG)
+            photo_btns.grid(row=7, column=0, sticky="w", pady=(8, 0))
+            ttk.Button(
+                photo_btns, text="Add photos\u2026",
+                command=self._upload_house_photos,
+            ).pack(side="left")
+            ttk.Button(
+                photo_btns, text="Clear",
+                command=self._clear_house_photos,
+            ).pack(side="left", padx=6)
             ttk.Label(
                 parent,
-                text="A gallery of 4 stock room photos is attached automatically.",
+                text=(
+                    "Upload up to 6 JPG/PNG photos of the place. "
+                    "Leave empty to use stock photos."
+                ),
                 style="TLabel", foreground="#6B7280", wraplength=400,
-            ).grid(row=5, column=0, sticky="w", pady=(8, 0))
+            ).grid(row=8, column=0, sticky="w", pady=(8, 0))
         else:
             ttk.Label(parent, text="Your budget (\u20ac/mo)",
                       style="H2.TLabel").grid(row=0, column=0, sticky="w",
@@ -337,11 +445,14 @@ class SetupScreen(tk.Frame):
             if self.house_desc_widget is not None:
                 house_desc = self.house_desc_widget.get("1.0", "end-1c").strip()
             house_desc = house_desc or "Comfortable place."
-            gallery = (
-                list(existing.house_photo_urls)
-                if existing and existing.house_photo_urls
-                else house_photo_gallery(pid)
-            )
+            # Priority: uploaded photos in this session > existing saved
+            # photos > auto-generated stock gallery.
+            if self.house_photos:
+                gallery = list(self.house_photos)
+            elif existing and existing.house_photo_urls:
+                gallery = list(existing.house_photo_urls)
+            else:
+                gallery = house_photo_gallery(pid)
             profile = Profile(
                 id=pid, name=name, age=age, photo_url=photo, email=email,
                 budget=rent, smoker=bool(self.smoker_var.get()),
