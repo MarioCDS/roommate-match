@@ -39,7 +39,7 @@ def featured_candidates() -> List[Profile]:
                 "330px-Hide_the_Pain_Harold_%28Andr%C3%A1s_Arat%C3%B3%29.jpg"
             ),
             email="harold@hidethepain.hu",
-            budget=400,
+            budget=0,
             smoker=False,
             schedule="early bird",
             bio=(
@@ -48,5 +48,12 @@ def featured_candidates() -> List[Profile]:
             ),
             pets=False,
             cleanliness="very tidy",
+            role="host",
+            rent=380,
+            house_description=(
+                "Cozy two-bedroom near Oktogon. Very quiet building. Everything "
+                "works perfectly. No problems at all. You'll love it here."
+            ),
+            house_photo_url="https://picsum.photos/seed/harold-room/600/400",
         ),
     ]

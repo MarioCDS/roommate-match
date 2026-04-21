@@ -64,10 +64,14 @@ class MatchesScreen(tk.Frame):
                      font=("Segoe UI", 10, "bold")).pack(side="left")
         smoker_txt = "smoker" if profile.smoker else "non-smoker"
         pets_txt = "has pets" if profile.pets else "no pets"
+        if profile.role == "host":
+            price_txt = f"Host  \u00b7  \u20ac{profile.rent}/mo rent"
+        else:
+            price_txt = f"Roomie  \u00b7  \u20ac{profile.budget}/mo budget"
         tk.Label(
             info,
             text=(
-                f"\u20ac{profile.budget}/mo  \u2022  {profile.schedule}  \u2022  "
+                f"{price_txt}  \u2022  {profile.schedule}  \u2022  "
                 f"{profile.cleanliness}  \u2022  {smoker_txt}  \u2022  {pets_txt}"
             ),
             bg=CARD_BG, fg=MUTED, font=("Segoe UI", 9), anchor="w",

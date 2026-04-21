@@ -1,4 +1,9 @@
-"""Core swipe screen: shows one candidate at a time with Like / Pass buttons."""
+"""Core swipe screen.
+
+Shows one candidate of the *opposite* role at a time:
+- A roomie sees host listings (house photo + description + rent).
+- A host sees roomie profiles (face + bio + budget).
+"""
 from __future__ import annotations
 
 import io
@@ -14,7 +19,8 @@ from models import Profile, compatibility
 from ui.common import BG, CARD_BG, TEXT, MUTED, PRIMARY, placeholder_image
 from ui.match_modal import MatchModal
 
-PHOTO_SIZE = (300, 300)
+PORTRAIT_SIZE = (300, 300)
+HOUSE_SIZE = (360, 240)
 
 
 class SwipeScreen(tk.Frame):
@@ -38,14 +44,18 @@ class SwipeScreen(tk.Frame):
                              highlightbackground="#E5E7EB")
         self.card.pack(padx=24, pady=18, fill="both", expand=True)
 
-        self.photo_label = tk.Label(self.card, bg=CARD_BG)
-        self.photo_label.pack(pady=(18, 10), anchor="center")
+        self.badge_label = tk.Label(
+            self.card, text="", bg=PRIMARY, fg="white",
+            font=("Segoe UI", 9, "bold"), padx=10, pady=2,
+        )
+        self.badge_label.pack(pady=(14, 6))
 
-        name_row = tk.Frame(self.card, bg=CARD_BG)
-        name_row.pack()
-        self.name_label = tk.Label(name_row, text="", bg=CARD_BG, fg=TEXT,
+        self.photo_label = tk.Label(self.card, bg=CARD_BG)
+        self.photo_label.pack(pady=(0, 10), anchor="center")
+
+        self.name_label = tk.Label(self.card, text="", bg=CARD_BG, fg=TEXT,
                                    font=("Segoe UI", 18, "bold"))
-        self.name_label.pack(side="left")
+        self.name_label.pack()
 
         self.score_label = tk.Label(
             self.card, text="", bg=CARD_BG, fg=PRIMARY,
@@ -58,7 +68,8 @@ class SwipeScreen(tk.Frame):
         self.meta_label.pack(pady=(2, 8))
 
         self.bio_label = tk.Label(self.card, text="", bg=CARD_BG, fg=TEXT,
-                                  font=("Segoe UI", 11), wraplength=380, justify="center")
+                                  font=("Segoe UI", 11), wraplength=380,
+                                  justify="center")
         self.bio_label.pack(padx=20, pady=(4, 10))
 
         self.status_label = tk.Label(self.card, text="", bg=CARD_BG, fg=MUTED,
@@ -78,7 +89,7 @@ class SwipeScreen(tk.Frame):
         self.like_btn.pack(side="left", padx=6)
 
         hint = tk.Label(
-            self, text="Tip: use \u2190 Left to pass and \u2192 Right to like.",
+            self, text="Tip: \u2190 Left = Pass, \u2192 Right = Like, Backspace = Undo.",
             bg=BG, fg=MUTED, font=("Segoe UI", 9, "italic"),
         )
         hint.pack(pady=(0, 4))
@@ -89,8 +100,6 @@ class SwipeScreen(tk.Frame):
                    command=self._refresh).pack()
 
     def _wire_keyboard(self) -> None:
-        # Bind on the Toplevel so arrow keys work without needing focus on a
-        # specific widget. Cleaned up automatically when the frame is destroyed.
         root = self.winfo_toplevel()
         root.bind("<Left>", self._key_pass)
         root.bind("<Right>", self._key_like)
@@ -123,6 +132,10 @@ class SwipeScreen(tk.Frame):
 
     # --- queue logic --------------------------------------------------
 
+    def _target_role(self) -> str:
+        me = self.app.my_profile
+        return "host" if (me and me.role == "roomie") else "roomie"
+
     def _prepare_queue(self) -> None:
         if not self.app.candidates:
             self._set_status("Loading candidates from randomuser.me \u2026")
@@ -154,11 +167,13 @@ class SwipeScreen(tk.Frame):
     def _apply_filters_and_render(self) -> None:
         matched_ids = {m.id for m in self.app.matches}
         me = self.app.my_profile
+        target = self._target_role()
         queue = [
             c for c in self.app.candidates
-            if c.id not in matched_ids and c.matches_filters(self.app.filters)
+            if c.role == target
+            and c.id not in matched_ids
+            and c.matches_filters(self.app.filters)
         ]
-        # Best matches first so the most compatible profiles surface immediately.
         if me is not None:
             queue.sort(key=lambda c: compatibility(me, c), reverse=True)
         self.queue = queue
@@ -167,8 +182,10 @@ class SwipeScreen(tk.Frame):
         self._refresh_undo_button()
         self._enable_actions()
         if not self.queue:
+            who = "hosts" if target == "host" else "roomies"
             self._show_empty(
-                "No candidates match your filters.\nTry widening them or refreshing the list.",
+                f"No {who} match your filters.\n"
+                "Try widening them or refreshing the list.",
             )
         else:
             self._render_current()
@@ -177,30 +194,41 @@ class SwipeScreen(tk.Frame):
         if self.index >= len(self.queue):
             self._show_empty("You\u2019ve seen everyone. Try refreshing or loosening filters.")
             return
+
         p = self.queue[self.index]
+        me = self.app.my_profile
+
+        if p.role == "host":
+            self.badge_label.configure(text="\U0001f3e0  HOST LISTING")
+            price_txt = f"\u20ac{p.rent}/mo rent"
+            self.bio_label.configure(text=p.house_description or "(no description)")
+        else:
+            self.badge_label.configure(text="LOOKING FOR A PLACE")
+            price_txt = f"\u20ac{p.budget}/mo budget"
+            self.bio_label.configure(text=p.bio)
+
         self.name_label.configure(text=f"{p.name}, {p.age}")
 
-        me = self.app.my_profile
         if me is not None:
-            score = compatibility(me, p)
-            self.score_label.configure(text=f"{score}% match")
+            self.score_label.configure(text=f"{compatibility(me, p)}% match")
         else:
             self.score_label.configure(text="")
 
         smoker_txt = "smoker" if p.smoker else "non-smoker"
-        pets_txt = "has pets" if p.pets else "no pets"
+        pets_txt = "pets ok" if p.pets else "no pets"
         self.meta_label.configure(
             text=(
-                f"\u20ac{p.budget}/mo  \u2022  {p.schedule}  \u2022  {p.cleanliness}\n"
+                f"{price_txt}  \u2022  {p.schedule}  \u2022  {p.cleanliness}\n"
                 f"{smoker_txt}  \u2022  {pets_txt}"
             ),
         )
-        self.bio_label.configure(text=p.bio)
         self._set_status("")
         self._load_photo_async(p)
 
     def _show_empty(self, msg: str) -> None:
-        self._photo_ref = placeholder_image("?", PHOTO_SIZE, 140)
+        self.badge_label.configure(text="")
+        size = PORTRAIT_SIZE
+        self._photo_ref = placeholder_image("?", size, 140)
         self.photo_label.configure(image=self._photo_ref)
         self.name_label.configure(text="No one here")
         self.score_label.configure(text="")
@@ -212,18 +240,23 @@ class SwipeScreen(tk.Frame):
     # --- photo loading ------------------------------------------------
 
     def _load_photo_async(self, profile: Profile) -> None:
-        # Placeholder first so we never show the previous face while loading.
-        self._photo_ref = placeholder_image(profile.name[:1].upper(), PHOTO_SIZE, 140)
+        size = HOUSE_SIZE if profile.role == "host" else PORTRAIT_SIZE
+        # Show a placeholder first so we never flash the previous image.
+        initial = "\U0001f3e0" if profile.role == "host" else profile.name[:1].upper()
+        # PIL can't render emoji with default fonts reliably, so use letter placeholder.
+        placeholder_letter = "H" if profile.role == "host" else profile.name[:1].upper()
+        self._photo_ref = placeholder_image(placeholder_letter, size, 100)
         self.photo_label.configure(image=self._photo_ref)
-        url = profile.photo_url
+
+        url = profile.display_photo
         if not url:
             return
 
-        def worker(expected_id=profile.id, u=url):
+        def worker(expected_id=profile.id, u=url, sz=size):
             try:
                 resp = requests.get(u, timeout=8)
                 resp.raise_for_status()
-                img = Image.open(io.BytesIO(resp.content)).convert("RGB").resize(PHOTO_SIZE)
+                img = Image.open(io.BytesIO(resp.content)).convert("RGB").resize(sz)
             except (requests.RequestException, OSError):
                 return
             self.after(0, lambda i=img, pid=expected_id: self._set_photo(pid, i))

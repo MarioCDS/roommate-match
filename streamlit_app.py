@@ -21,7 +21,10 @@ import streamlit as st
 
 from api import fetch_candidates
 from auth import authenticate, create_user, validate_new_credentials
-from models import Profile, Filters, SCHEDULES, CLEANLINESS_LEVELS, avatar_url, compatibility
+from models import (
+    Profile, Filters, SCHEDULES, CLEANLINESS_LEVELS,
+    avatar_url, house_photo_url, compatibility,
+)
 from storage import (
     load_json, save_json,
     CANDIDATES_FILE,
@@ -148,12 +151,15 @@ def load_candidates() -> list[Profile]:
 def build_queue() -> list[Profile]:
     candidates = load_candidates()
     matched_ids = {m.id for m in st.session_state.matches}
+    me = st.session_state.my_profile
+    target = "host" if (me and me.role == "roomie") else "roomie"
     queue = [
         c for c in candidates
-        if c.id not in matched_ids and c.matches_filters(st.session_state.filters)
+        if c.role == target
+        and c.id not in matched_ids
+        and c.matches_filters(st.session_state.filters)
     ]
     # Best matches first, using the compatibility score.
-    me = st.session_state.my_profile
     if me is not None:
         queue.sort(key=lambda c: compatibility(me, c), reverse=True)
     st.session_state.queue = queue
@@ -304,7 +310,20 @@ def view_auth() -> None:
 def view_setup() -> None:
     existing = st.session_state.my_profile
     st.title("Your profile" if existing else "Welcome! Create your profile")
-    st.caption("This info is shown to other roommates when they swipe on you.")
+    st.caption("This info is shown to other people when they swipe on you.")
+
+    # Role radio is OUTSIDE the form so we can switch the form fields
+    # on the fly without the user needing to submit first.
+    role = st.radio(
+        "I'm a:",
+        options=["roomie", "host"],
+        format_func=lambda r: (
+            "Roomie - looking for a place" if r == "roomie"
+            else "Host - have a place to offer"
+        ),
+        index=(0 if (not existing or existing.role == "roomie") else 1),
+        horizontal=True,
+    )
 
     with st.form("setup_form"):
         name = st.text_input("Name", value=existing.name if existing else "")
@@ -316,11 +335,6 @@ def view_setup() -> None:
             )
         with col_email:
             email = st.text_input("Email", value=existing.email if existing else "")
-
-        budget = st.slider(
-            "Budget (\u20ac/month)", 200, 1500,
-            value=existing.budget if existing else 500, step=25,
-        )
 
         col_sched, col_clean = st.columns(2)
         with col_sched:
@@ -341,11 +355,33 @@ def view_setup() -> None:
         with col_pets:
             pets = st.checkbox("I have pets", value=existing.pets if existing else False)
 
+        # Role-specific fields.
+        if role == "host":
+            rent = st.slider(
+                "Monthly rent you charge (\u20ac)", 200, 2000,
+                value=(existing.rent if existing and existing.rent else 500),
+                step=25,
+            )
+            house_description = st.text_area(
+                "About the place",
+                value=existing.house_description if existing else "",
+                height=140,
+                placeholder="Describe the apartment: neighborhood, rooms, amenities, vibe.",
+            )
+            budget = rent
+        else:
+            budget = st.slider(
+                "Your budget (\u20ac/month)", 200, 1500,
+                value=existing.budget if existing else 500, step=25,
+            )
+            rent = 0
+            house_description = ""
+
         bio = st.text_area(
             "Bio",
             value=existing.bio if existing else "",
-            height=160,
-            placeholder="Tell potential roommates a bit about yourself: daily routine, habits, what you're looking for\u2026",
+            height=140,
+            placeholder="Tell others a bit about yourself: routine, habits, what you\u2019re looking for.",
         )
 
         submitted = st.form_submit_button(
@@ -359,6 +395,16 @@ def view_setup() -> None:
             return
         pid = existing.id if existing else str(uuid.uuid4())
         photo = existing.photo_url if existing and existing.photo_url else avatar_url(pid)
+        if role == "host":
+            hphoto = (
+                existing.house_photo_url
+                if existing and existing.house_photo_url
+                else house_photo_url(pid)
+            )
+            hdesc = house_description.strip() or "Comfortable place."
+        else:
+            hphoto = ""
+            hdesc = ""
         p = Profile(
             id=pid,
             name=name.strip(),
@@ -371,6 +417,10 @@ def view_setup() -> None:
             bio=bio.strip() or "(no bio)",
             pets=bool(pets),
             cleanliness=cleanliness,
+            role=role,
+            rent=int(rent),
+            house_description=hdesc,
+            house_photo_url=hphoto,
         )
         save_my_profile(p)
         go("filters" if existing is None else "swipe")
@@ -458,12 +508,32 @@ def view_swipe() -> None:
     p = queue[idx]
     me = st.session_state.my_profile
     score = compatibility(me, p) if me else None
+    is_host = p.role == "host"
+
+    badge = "\U0001f3e0 HOST LISTING" if is_host else "\U0001f464 LOOKING FOR A PLACE"
+    st.markdown(
+        f"<div style='display:inline-block;background:#4F46E5;color:white;"
+        f"padding:2px 10px;border-radius:6px;font-size:0.8rem;"
+        f"font-weight:700;margin-bottom:6px'>{badge}</div>",
+        unsafe_allow_html=True,
+    )
+
+    display_photo = p.house_photo_url if is_host else p.photo_url
+    description = p.house_description if is_host else p.bio
+    price_txt = (
+        f"\u20ac{p.rent}/month rent" if is_host else f"\u20ac{p.budget}/month budget"
+    )
 
     with st.container(border=True):
-        if p.photo_url:
-            left, mid, right = st.columns([1, 2, 1])
-            with mid:
-                st.image(p.photo_url, use_container_width=True)
+        if display_photo:
+            if is_host:
+                # House photo fills the card width.
+                st.image(display_photo, use_container_width=True)
+            else:
+                # Person photo centred with padding on either side.
+                left, mid, right = st.columns([1, 2, 1])
+                with mid:
+                    st.image(display_photo, use_container_width=True)
 
         head_cols = st.columns([3, 1])
         head_cols[0].subheader(f"{p.name}, {p.age}")
@@ -476,12 +546,12 @@ def view_swipe() -> None:
             )
 
         smoker_txt = "smoker" if p.smoker else "non-smoker"
-        pets_txt = "has pets" if p.pets else "no pets"
+        pets_txt = "pets ok" if p.pets else "no pets"
         st.caption(
-            f"\u20ac{p.budget}/month  \u2022  {p.schedule}  \u2022  {p.cleanliness}  \u2022  "
+            f"{price_txt}  \u2022  {p.schedule}  \u2022  {p.cleanliness}  \u2022  "
             f"{smoker_txt}  \u2022  {pets_txt}"
         )
-        st.write(p.bio)
+        st.write(description)
 
     col_pass, col_undo, col_like = st.columns([1, 1, 1])
     if col_pass.button("Pass", key=f"pass_{p.id}", use_container_width=True):
@@ -527,7 +597,7 @@ def view_matches() -> None:
     elif sort_by == "Compatibility" and me is not None:
         sorted_matches.sort(key=lambda m: compatibility(me, m), reverse=True)
     elif sort_by == "Budget (low to high)":
-        sorted_matches.sort(key=lambda m: m.budget)
+        sorted_matches.sort(key=lambda m: m.effective_price)
     elif sort_by == "Name":
         sorted_matches.sort(key=lambda m: m.name.lower())
     elif sort_by == "Age":
@@ -538,9 +608,16 @@ def view_matches() -> None:
         with st.container(border=True):
             cols = st.columns([1, 3])
             with cols[0]:
+                # Always show the person photo in the matches list so names
+                # and faces line up; the house photo shows on the swipe card.
                 if m.photo_url:
                     st.image(m.photo_url, width=80)
             with cols[1]:
+                role_tag = "Host" if m.role == "host" else "Roomie"
+                price_txt = (
+                    f"\u20ac{m.rent}/mo rent" if m.role == "host"
+                    else f"\u20ac{m.budget}/mo budget"
+                )
                 title = f"**{m.name}, {m.age}**"
                 if score is not None:
                     title += (
@@ -549,9 +626,9 @@ def view_matches() -> None:
                     )
                 st.markdown(title, unsafe_allow_html=True)
                 smoker_txt = "smoker" if m.smoker else "non-smoker"
-                pets_txt = "has pets" if m.pets else "no pets"
+                pets_txt = "pets ok" if m.pets else "no pets"
                 st.caption(
-                    f"\u20ac{m.budget}/month  \u2022  {m.schedule}  \u2022  "
+                    f"{role_tag}  \u00b7  {price_txt}  \u2022  {m.schedule}  \u2022  "
                     f"{m.cleanliness}  \u2022  {smoker_txt}  \u2022  {pets_txt}"
                 )
                 st.markdown(f"\U0001f4e7 `{m.email}`")
