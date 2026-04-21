@@ -330,7 +330,10 @@ def view_auth():
 
 def view_setup():
     existing = st.session_state.my_profile
-    st.title("Your profile" if existing else "Welcome! Create your profile")
+    st.title(
+        "Your profile" if existing else "Welcome! Create your profile",
+        anchor=False,
+    )
     st.caption("This info is shown to other people when they swipe on you.")
 
     # Role radio is OUTSIDE the form so we can switch the form fields
@@ -600,7 +603,7 @@ def _save_uploaded_avatar(uploaded, username):
 
 
 def view_filters():
-    st.title("Your preferences")
+    st.title("Your preferences", anchor=False)
     st.caption("Filter candidates before you swipe. Leave as \u201cany\u201d to see everyone.")
     f = st.session_state.filters
 
@@ -646,7 +649,7 @@ def view_filters():
 
 
 def view_swipe():
-    st.title("Swipe")
+    st.title("Swipe", anchor=False)
 
     # Trigger the match dialog when add_match() has queued one. Clear the flag
     # immediately so the modal only opens once per match.
@@ -696,7 +699,6 @@ def view_swipe():
         unsafe_allow_html=True,
     )
 
-    description = p.house_description if is_host else p.bio
     price_txt = (
         f"\u20ac{p.rent}/month rent" if is_host else f"\u20ac{p.budget}/month budget"
     )
@@ -738,11 +740,11 @@ def view_swipe():
                     st.image(p.photo_url, width=58)
                 except Exception:
                     pass
-            head_cols[1].subheader(f"{p.name}, {p.age}")
+            head_cols[1].subheader(f"{p.name}, {p.age}", anchor=False)
             score_col = head_cols[2]
         else:
             head_cols = st.columns([3, 1])
-            head_cols[0].subheader(f"{p.name}, {p.age}")
+            head_cols[0].subheader(f"{p.name}, {p.age}", anchor=False)
             score_col = head_cols[1]
         if score is not None:
             score_col.markdown(
@@ -769,7 +771,17 @@ def view_swipe():
             f"{price_txt}  \u2022  {p.schedule}  \u2022  {p.cleanliness}  \u2022  "
             f"{smoker_txt}  \u2022  {pets_txt}"
         )
-        st.write(description)
+
+        if is_host:
+            # Host cards show two separate sections: the flat, then the person.
+            st.markdown("**About the place**")
+            st.write(p.house_description or "_(no description)_")
+            if p.bio:
+                first = p.name.split()[0] if p.name else "them"
+                st.markdown(f"**About {first}**")
+                st.write(p.bio)
+        else:
+            st.write(p.bio)
 
     col_pass, col_undo, col_like = st.columns([1, 1, 1])
     if col_pass.button("Pass", key=f"pass_{p.id}", use_container_width=True):
@@ -810,7 +822,7 @@ def view_swipe():
 def view_matches():
     matches = st.session_state.matches
     me = st.session_state.my_profile
-    st.title(f"Your matches ({len(matches)})")
+    st.title(f"Your matches ({len(matches)})", anchor=False)
     if not matches:
         st.info("No matches yet. Head to Swipe and like some profiles!")
         if st.button("Go to Swipe", type="primary"):
@@ -898,7 +910,7 @@ def view_chat():
                 except Exception:
                     pass
         with head[1]:
-            st.subheader(f"Chat with {peer.name.split()[0]}")
+            st.subheader(f"Chat with {peer.name.split()[0]}", anchor=False)
             role_tag = "Host" if peer.role == "host" else "Roomie"
             st.caption(
                 f"{role_tag}  \u00b7  "
