@@ -361,9 +361,9 @@ def view_auth():
             u = st.text_input("Username", key="signup_u")
             p = st.text_input(
                 "Password", type="password", key="signup_p",
+                placeholder="6+ chars, 1 uppercase, 1 symbol",
                 help=PASSWORD_RULES,
             )
-            st.caption(PASSWORD_RULES)
             c = st.text_input("Confirm password", type="password", key="signup_c")
             submitted = st.form_submit_button("Create account", use_container_width=True)
         if submitted:
