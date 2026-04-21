@@ -79,14 +79,25 @@ st.markdown("""
     .nav-bar {
         background: #4F46E5;
         color: #FFFFFF;
-        padding: 0.6rem 1rem;
+        padding: 0.55rem 1rem;
         border-radius: 8px;
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.45rem;
         display: flex;
         justify-content: space-between;
+        align-items: center;
     }
-    .nav-bar b { font-size: 1.1rem; color: #FFFFFF; }
+    .nav-bar b { font-size: 1.1rem; color: #FFFFFF; letter-spacing: -0.01em; }
     .nav-bar .who { color: #C7D2FE; font-style: italic; }
+    /* Tighten up native Streamlit button spacing inside the nav row so the
+       five primary nav buttons sit close to each other like a pill bar. */
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] > div {
+        gap: 0.25rem;
+    }
+    .stButton > button {
+        border-radius: 8px;
+        font-weight: 600;
+        padding: 0.35rem 0.6rem;
+    }
     .match-title {
         color: #4F46E5;
         font-size: 2rem;
@@ -270,26 +281,54 @@ def save_filters(f):
 def render_nav():
     if not st.session_state.current_user:
         return
-    st.markdown(
-        f"<div class='nav-bar'>"
-        f"<span><b>\U0001f3e0 NOVA Roomie</b></span>"
-        f"<span class='who'>@{st.session_state.current_user}</span>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-    cols = st.columns(6)
-    labels_cmds = [
-        ("Swipe", lambda: go("swipe")),
-        ("Map", lambda: go("map")),
-        ("Matches", lambda: go("matches")),
-        ("Filters", lambda: go("filters")),
-        ("Profile", lambda: go("setup")),
-        ("Log out", logout),
+
+    profile_missing = st.session_state.my_profile is None
+
+    # Brand strip with username and a quiet Log out link on the right.
+    brand_cols = st.columns([5, 1])
+    with brand_cols[0]:
+        st.markdown(
+            f"<div class='nav-bar'>"
+            f"<span><b>\U0001f3e0 NOVA Roomie</b></span>"
+            f"<span class='who'>@{st.session_state.current_user}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    with brand_cols[1]:
+        if st.button("Log out", key="nav_logout", use_container_width=True):
+            logout()
+
+    # Primary nav: equal-width pills, active view highlighted in brand colour.
+    # Non-Profile buttons are disabled until the user has saved a profile so
+    # they can't start swiping empty.
+    nav_items = [
+        ("Swipe", "swipe"),
+        ("Map", "map"),
+        ("Matches", "matches"),
+        ("Filters", "filters"),
+        ("Profile", "setup"),
     ]
-    for col, (label, cmd) in zip(cols, labels_cmds):
-        if col.button(label, key=f"nav_{label}"):
-            cmd()
-    st.markdown("---")
+    cols = st.columns(len(nav_items), gap="small")
+    current_view = st.session_state.view
+    for col, (label, view_name) in zip(cols, nav_items):
+        is_active = (current_view == view_name)
+        disabled = profile_missing and view_name != "setup"
+        with col:
+            if st.button(
+                label,
+                key=f"nav_{view_name}",
+                type="primary" if is_active else "secondary",
+                use_container_width=True,
+                disabled=disabled,
+            ):
+                go(view_name)
+
+    if profile_missing:
+        st.info(
+            "Finish setting up your profile to unlock swiping, filters, "
+            "and matches.",
+            icon="\u2139\ufe0f",
+        )
 
 
 def view_auth():
@@ -338,7 +377,15 @@ def view_setup():
         "Your profile" if existing else "Welcome! Create your profile",
         anchor=False,
     )
-    st.caption("This info is shown to other people when they swipe on you.")
+    if existing is None:
+        st.caption(
+            "Tell others who you are and what you're looking for. You'll be "
+            "able to swipe once you save this."
+        )
+    else:
+        st.caption(
+            "This info is shown to other people when they swipe on you."
+        )
 
     # Role radio is OUTSIDE the form so we can switch the form fields
     # on the fly without the user needing to submit first.
@@ -1125,6 +1172,15 @@ def _show_match_dialog(my, other):
 # --------------------------------------------------------------------
 
 init_state()
+
+# Guard: a logged-in user without a profile has to complete setup before
+# anything else. Flipping the view here (before render_nav) keeps the nav
+# in sync so the Profile button renders as active.
+if (st.session_state.current_user
+        and st.session_state.my_profile is None
+        and st.session_state.view not in ("auth", "setup")):
+    st.session_state.view = "setup"
+
 render_nav()
 
 VIEWS = {
