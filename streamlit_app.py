@@ -21,6 +21,7 @@ import streamlit as st
 
 from api import fetch_candidates
 from auth import authenticate, create_user, validate_new_credentials
+from chat import append_message, load_chat, maybe_canned_reply
 from models import (
     Profile, Filters, SCHEDULES, CLEANLINESS_LEVELS,
     avatar_url, house_photo_gallery, compatibility,
@@ -124,6 +125,7 @@ def init_state() -> None:
         "matched_profile": None,      # candidate to show in the modal
         "last_action": None,          # ("like" | "pass", Profile) for undo
         "gallery_idx": 0,             # photo index within the current listing
+        "chat_peer": None,            # Profile we're currently chatting with
     }
     for k, v in defaults.items():
         st.session_state.setdefault(k, v)
@@ -716,10 +718,23 @@ def view_swipe() -> None:
             with mid:
                 st.image(p.photo_url, use_container_width=True)
 
-        head_cols = st.columns([3, 1])
-        head_cols[0].subheader(f"{p.name}, {p.age}")
+        # Host cards show a small portrait next to the name so the roomie
+        # sees who's behind the listing.
+        if is_host and p.photo_url:
+            head_cols = st.columns([1, 4, 2])
+            with head_cols[0]:
+                try:
+                    st.image(p.photo_url, width=58)
+                except Exception:
+                    pass
+            head_cols[1].subheader(f"{p.name}, {p.age}")
+            score_col = head_cols[2]
+        else:
+            head_cols = st.columns([3, 1])
+            head_cols[0].subheader(f"{p.name}, {p.age}")
+            score_col = head_cols[1]
         if score is not None:
-            head_cols[1].markdown(
+            score_col.markdown(
                 f"<div style='text-align:right;color:#4F46E5;"
                 f"font-weight:700;font-size:1.15rem;padding-top:0.5rem'>"
                 f"{score}% match</div>",
@@ -766,6 +781,20 @@ def view_swipe() -> None:
         st.session_state.queue_index += 1
         st.rerun()
 
+    # Always-visible refresh so stale caches can be blown away without
+    # needing to reach the empty state first.
+    with st.expander("Pool options"):
+        if st.button("Refresh candidates from randomuser.me",
+                     key="swipe_refresh", use_container_width=True):
+            try:
+                profiles = fetch_candidates(30)
+                save_json(CANDIDATES_FILE, [p.to_dict() for p in profiles])
+                st.session_state.candidates = profiles
+                build_queue()
+                st.rerun()
+            except requests.RequestException as e:
+                st.error(f"Network error: {e}")
+
 
 def view_matches() -> None:
     matches = st.session_state.matches
@@ -798,12 +827,15 @@ def view_matches() -> None:
     for m in sorted_matches:
         score = compatibility(me, m) if me else None
         with st.container(border=True):
-            cols = st.columns([1, 3])
+            cols = st.columns([1, 3, 1])
             with cols[0]:
                 # Always show the person photo in the matches list so names
                 # and faces line up; the house photo shows on the swipe card.
                 if m.photo_url:
-                    st.image(m.photo_url, width=80)
+                    try:
+                        st.image(m.photo_url, width=80)
+                    except Exception:
+                        pass
             with cols[1]:
                 role_tag = "Host" if m.role == "host" else "Roomie"
                 price_txt = (
@@ -824,6 +856,72 @@ def view_matches() -> None:
                     f"{m.cleanliness}  \u2022  {smoker_txt}  \u2022  {pets_txt}"
                 )
                 st.markdown(f"\U0001f4e7 `{m.email}`")
+            with cols[2]:
+                # Chat opener with a small message-count hint.
+                peer_msgs = load_chat(st.session_state.current_user, m.id)
+                label = f"Chat ({len(peer_msgs)})" if peer_msgs else "Chat"
+                if st.button(label, key=f"chat_open_{m.id}",
+                             use_container_width=True):
+                    st.session_state.chat_peer = m
+                    go("chat")
+
+
+def view_chat() -> None:
+    peer = st.session_state.chat_peer
+    me_user = st.session_state.current_user
+    if peer is None or not me_user:
+        go("matches")
+        return
+
+    top = st.columns([1, 5])
+    with top[0]:
+        if st.button("\u2190 Back", use_container_width=True):
+            st.session_state.chat_peer = None
+            go("matches")
+    with top[1]:
+        head = st.columns([1, 5])
+        with head[0]:
+            if peer.photo_url:
+                try:
+                    st.image(peer.photo_url, width=56)
+                except Exception:
+                    pass
+        with head[1]:
+            st.subheader(f"Chat with {peer.name.split()[0]}")
+            role_tag = "Host" if peer.role == "host" else "Roomie"
+            st.caption(
+                f"{role_tag}  \u00b7  "
+                + (
+                    f"\u20ac{peer.rent}/mo rent"
+                    if peer.role == "host" else f"\u20ac{peer.budget}/mo budget"
+                )
+            )
+
+    st.markdown("---")
+    messages = load_chat(me_user, peer.id)
+    if not messages:
+        st.caption(
+            "Say hi to kick things off. Replies are canned responses for demo "
+            "purposes."
+        )
+
+    for m in messages:
+        role = "user" if m["from"] == "me" else "assistant"
+        avatar = None
+        if m["from"] == "them" and peer.photo_url:
+            avatar = peer.photo_url
+        with st.chat_message(role, avatar=avatar):
+            st.write(m["text"])
+
+    prompt = st.chat_input("Type a message\u2026")
+    if prompt:
+        text = prompt.strip()
+        if text:
+            append_message(me_user, peer.id, "me", text)
+            reply = maybe_canned_reply()
+            if reply is not None:
+                append_message(me_user, peer.id, "them", reply)
+            st.rerun()
 
 
 @st.dialog("It's a Match!")
@@ -864,5 +962,6 @@ VIEWS = {
     "filters": view_filters,
     "swipe": view_swipe,
     "matches": view_matches,
+    "chat": view_chat,
 }
 VIEWS[st.session_state.view]()

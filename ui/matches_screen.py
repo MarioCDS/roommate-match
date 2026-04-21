@@ -11,6 +11,7 @@ from PIL import Image, ImageTk
 
 from models import Profile, compatibility
 from ui.common import BG, CARD_BG, TEXT, MUTED, PRIMARY, placeholder_image
+from ui.chat_window import ChatWindow
 
 THUMB_SIZE = (72, 72)
 
@@ -78,6 +79,12 @@ class MatchesScreen(tk.Frame):
         ).pack(anchor="w")
         tk.Label(info, text=f"Contact: {profile.email}", bg=CARD_BG, fg=TEXT,
                  font=("Segoe UI", 10), anchor="w").pack(anchor="w", pady=(4, 0))
+
+        ttk.Button(
+            info, text="Chat",
+            command=lambda p=profile: ChatWindow(self.winfo_toplevel(),
+                                                  self.app, p),
+        ).pack(anchor="w", pady=(6, 0))
 
         if profile.photo_url:
             threading.Thread(

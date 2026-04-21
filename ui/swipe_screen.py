@@ -22,6 +22,7 @@ from ui.match_modal import MatchModal
 
 PORTRAIT_SIZE = (220, 220)     # closer to randomuser's native 128 to avoid heavy upscaling
 HOUSE_SIZE = (360, 240)
+HOST_AVATAR_SIZE = (48, 48)
 
 
 def _load_image(src: str, size: tuple[int, int], timeout: float = 8.0) -> Image.Image:
@@ -46,6 +47,7 @@ class SwipeScreen(tk.Frame):
         self.index = 0
         self._last_action: tuple[str, Profile] | None = None
         self._gallery_index = 0  # which photo within the current host's gallery
+        self._host_avatar_ref: ImageTk.PhotoImage | None = None
 
         self._build()
         self._prepare_queue()
@@ -252,6 +254,7 @@ class SwipeScreen(tk.Frame):
             self.bio_label.configure(text=p.bio)
 
         self.name_label.configure(text=f"{p.name}, {p.age}")
+        self._update_host_avatar(p)
 
         if me is not None:
             self.score_label.configure(text=f"{compatibility(me, p)}% match")
@@ -284,6 +287,7 @@ class SwipeScreen(tk.Frame):
         self._photo_ref = placeholder_image("?", size, 140)
         self.photo_label.configure(image=self._photo_ref)
         self.name_label.configure(text="No one here")
+        self.host_avatar_label.pack_forget()
         self.score_label.configure(text="")
         self.meta_label.configure(text="")
         self.bio_label.configure(text=msg)
@@ -351,6 +355,41 @@ class SwipeScreen(tk.Frame):
         self._gallery_index = (self._gallery_index + 1) % len(p.house_photo_urls)
         self._update_gallery_controls(p)
         self._load_photo_async(p)
+
+    def _update_host_avatar(self, profile: Profile) -> None:
+        if profile.role != "host" or not profile.photo_url:
+            self.host_avatar_label.pack_forget()
+            return
+        # Placeholder first so it renders immediately; real image loads async.
+        initial = profile.name[:1].upper() if profile.name else "?"
+        self._host_avatar_ref = placeholder_image(initial, HOST_AVATAR_SIZE, 26)
+        self.host_avatar_label.configure(image=self._host_avatar_ref)
+        try:
+            self.host_avatar_label.pack(side="left", padx=(0, 10),
+                                        before=self.name_label)
+        except tk.TclError:
+            self.host_avatar_label.pack(side="left", padx=(0, 10))
+
+        url = profile.photo_url
+        expected_state = (profile.id, self._gallery_index)
+
+        def worker(u=url, state=expected_state):
+            try:
+                img = _load_image(u, HOST_AVATAR_SIZE)
+            except (requests.RequestException, OSError):
+                return
+            self.after(0, lambda i=img, s=state: self._apply_host_avatar(s, i))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_host_avatar(self, expected_state, pil_image: Image.Image) -> None:
+        if self.index >= len(self.queue):
+            return
+        current = (self.queue[self.index].id, self._gallery_index)
+        if current[0] != expected_state[0]:
+            return
+        self._host_avatar_ref = ImageTk.PhotoImage(pil_image)
+        self.host_avatar_label.configure(image=self._host_avatar_ref)
 
     def _update_gallery_controls(self, profile: Profile) -> None:
         if profile.role == "host" and len(profile.house_photo_urls) > 1:
