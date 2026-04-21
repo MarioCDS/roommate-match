@@ -13,9 +13,40 @@ API_URL = "https://randomuser.me/api/"
 def fetch_candidates(n: int = 30, timeout: float = 10.0) -> List[Profile]:
     """Fetch n random users and wrap them as Profile objects.
 
+    The returned list always starts with our hand-picked featured candidates
+    (see ``featured_candidates``) so there is at least one familiar face in
+    the demo pool.
+
     Raises requests.RequestException on network failure.
     """
     resp = requests.get(API_URL, params={"results": n, "nat": "us,gb,es,fr,de,br"}, timeout=timeout)
     resp.raise_for_status()
     data = resp.json()
-    return [Profile.from_randomuser(u) for u in data.get("results", [])]
+    api_profiles = [Profile.from_randomuser(u) for u in data.get("results", [])]
+    return featured_candidates() + api_profiles
+
+
+def featured_candidates() -> List[Profile]:
+    """Always-present seeded candidates mixed into the demo pool."""
+    return [
+        Profile(
+            id="harold-arato",
+            name="Harold Arato",
+            age=77,
+            photo_url=(
+                "https://upload.wikimedia.org/wikipedia/en/thumb/"
+                "a/a4/Hide_the_Pain_Harold_%28Andr%C3%A1s_Arat%C3%B3%29.jpg/"
+                "330px-Hide_the_Pain_Harold_%28Andr%C3%A1s_Arat%C3%B3%29.jpg"
+            ),
+            email="harold@hidethepain.hu",
+            budget=400,
+            smoker=False,
+            schedule="early bird",
+            bio=(
+                "Retired electrical engineer from Budapest. Love photography, "
+                "long walks, and a tidy kitchen. Everything is fine. Really."
+            ),
+            pets=False,
+            cleanliness="very tidy",
+        ),
+    ]

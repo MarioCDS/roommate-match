@@ -45,6 +45,17 @@ st.markdown("""
     /* No hardcoded page background or text colour, so Streamlit's
        light/dark theme toggle (top-right menu) works naturally. */
     .stButton > button { width: 100%; }
+    /* Tab labels must stay readable in both themes. Inherit the base
+       text colour and distinguish the active tab by brand color. */
+    .stTabs [role="tab"] {
+        color: inherit !important;
+        opacity: 0.7;
+    }
+    .stTabs [role="tab"][aria-selected="true"] {
+        color: #4F46E5 !important;
+        opacity: 1;
+    }
+    .stTabs [role="tab"]:hover { opacity: 1; }
     .roomie-brand {
         color: #4F46E5;
         font-size: 2.4rem;
