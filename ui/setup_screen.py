@@ -5,7 +5,7 @@ import tkinter as tk
 import uuid
 from tkinter import ttk, messagebox
 
-from models import Profile, SCHEDULES, CLEANLINESS_LEVELS
+from models import Profile, SCHEDULES, CLEANLINESS_LEVELS, avatar_url
 from ui.common import BG, CARD_BG, BORDER
 
 
@@ -110,11 +110,13 @@ class SetupScreen(tk.Frame):
         bio = self.bio_widget.get("1.0", "end-1c").strip() or "(no bio)"
 
         existing = self.app.my_profile
+        pid = existing.id if existing else str(uuid.uuid4())
+        photo = existing.photo_url if existing and existing.photo_url else avatar_url(pid)
         profile = Profile(
-            id=existing.id if existing else str(uuid.uuid4()),
+            id=pid,
             name=name,
             age=age,
-            photo_url="",
+            photo_url=photo,
             email=email,
             budget=int(self.budget_var.get()),
             smoker=bool(self.smoker_var.get()),

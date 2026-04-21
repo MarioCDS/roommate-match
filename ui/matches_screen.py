@@ -9,8 +9,8 @@ from tkinter import ttk
 import requests
 from PIL import Image, ImageTk
 
-from models import Profile
-from ui.common import BG, CARD_BG, TEXT, MUTED, placeholder_image
+from models import Profile, compatibility
+from ui.common import BG, CARD_BG, TEXT, MUTED, PRIMARY, placeholder_image
 
 THUMB_SIZE = (72, 72)
 
@@ -52,8 +52,16 @@ class MatchesScreen(tk.Frame):
         info = tk.Frame(row, bg=CARD_BG)
         info.pack(side="left", fill="both", expand=True, padx=(4, 12), pady=10)
 
-        tk.Label(info, text=f"{profile.name}, {profile.age}", bg=CARD_BG, fg=TEXT,
-                 font=("Segoe UI", 12, "bold"), anchor="w").pack(anchor="w")
+        header = tk.Frame(info, bg=CARD_BG)
+        header.pack(anchor="w", fill="x")
+        tk.Label(header, text=f"{profile.name}, {profile.age}", bg=CARD_BG, fg=TEXT,
+                 font=("Segoe UI", 12, "bold"), anchor="w").pack(side="left")
+
+        me = self.app.my_profile
+        if me is not None:
+            score = compatibility(me, profile)
+            tk.Label(header, text=f"  {score}% match", bg=CARD_BG, fg=PRIMARY,
+                     font=("Segoe UI", 10, "bold")).pack(side="left")
         smoker_txt = "smoker" if profile.smoker else "non-smoker"
         pets_txt = "has pets" if profile.pets else "no pets"
         tk.Label(

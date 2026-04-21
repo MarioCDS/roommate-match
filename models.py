@@ -46,11 +46,14 @@ class Profile:
     @classmethod
     def from_randomuser(cls, d: dict) -> "Profile":
         name = f"{d['name']['first']} {d['name']['last']}"
+        uid = d["login"]["uuid"]
+        # randomuser.me "large" photos are 128x128 and look soft when upscaled.
+        # pravatar.cc serves deterministic 500x500 avatars seeded on the UUID.
         return cls(
-            id=d["login"]["uuid"],
+            id=uid,
             name=name,
             age=int(d["dob"]["age"]),
-            photo_url=d["picture"]["large"],
+            photo_url=avatar_url(uid),
             email=d["email"],
             budget=random.choice([350, 400, 450, 500, 550, 600, 700, 800, 900]),
             smoker=random.random() < 0.3,
@@ -59,6 +62,52 @@ class Profile:
             pets=random.random() < 0.35,
             cleanliness=random.choice(CLEANLINESS_LEVELS),
         )
+
+
+def avatar_url(seed: str) -> str:
+    """Deterministic 500x500 avatar URL from a seed (UUID or username)."""
+    return f"https://i.pravatar.cc/500?u={seed}"
+
+
+def compatibility(me: Profile, other: Profile) -> int:
+    """Return a 0-100 score estimating how well ``other`` fits ``me``.
+
+    Weights roughly reflect what roommates most commonly argue about: money,
+    schedule, smoking, cleanliness, pets.
+    """
+    # Budget: closer monthly budgets, higher score. 30% weight.
+    diff = abs(me.budget - other.budget)
+    budget_s = 100 if diff < 100 else 70 if diff < 300 else 30
+
+    # Schedule compatibility. 25%.
+    if me.schedule == other.schedule:
+        sched_s = 100
+    elif "flexible" in (me.schedule, other.schedule):
+        sched_s = 70
+    else:
+        sched_s = 25  # early bird + night owl = probably rough
+
+    # Smoking agreement. 20%.
+    smok_s = 100 if me.smoker == other.smoker else 15
+
+    # Cleanliness. 15%. Penalise by level gap.
+    levels = {"very tidy": 2, "tidy": 1, "relaxed": 0}
+    lev_diff = abs(
+        levels.get(me.cleanliness, 1) - levels.get(other.cleanliness, 1)
+    )
+    clean_s = {0: 100, 1: 70, 2: 30}.get(lev_diff, 30)
+
+    # Pets. 10%.
+    pets_s = 100 if me.pets == other.pets else 55
+
+    total = (
+        budget_s * 0.30
+        + sched_s * 0.25
+        + smok_s * 0.20
+        + clean_s * 0.15
+        + pets_s * 0.10
+    )
+    return int(round(total))
 
     def matches_filters(self, f: "Filters") -> bool:
         if self.budget > f.max_budget:

@@ -165,6 +165,11 @@ class App(tk.Tk):
             self.matches.append(profile)
             save_json(matches_file(u), [m.to_dict() for m in self.matches])
 
+    def remove_match(self, profile: Profile) -> None:
+        u = self._require_user()
+        self.matches = [m for m in self.matches if m.id != profile.id]
+        save_json(matches_file(u), [m.to_dict() for m in self.matches])
+
     def save_filters(self, f: Filters) -> None:
         u = self._require_user()
         self.filters = f

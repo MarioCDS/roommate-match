@@ -21,7 +21,7 @@ import streamlit as st
 
 from api import fetch_candidates
 from auth import authenticate, create_user, validate_new_credentials
-from models import Profile, Filters, SCHEDULES, CLEANLINESS_LEVELS
+from models import Profile, Filters, SCHEDULES, CLEANLINESS_LEVELS, avatar_url, compatibility
 from storage import (
     load_json, save_json,
     CANDIDATES_FILE,
@@ -42,8 +42,8 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .stApp { background: #F7F8FA; }
-    h1, h2, h3 { color: #2B2D42; }
+    /* No hardcoded page background or text colour, so Streamlit's
+       light/dark theme toggle (top-right menu) works naturally. */
     .stButton > button { width: 100%; }
     .roomie-brand {
         color: #4F46E5;
@@ -54,21 +54,38 @@ st.markdown("""
         letter-spacing: -0.02em;
     }
     .roomie-subtitle {
-        color: #6B7280;
+        opacity: 0.7;
         text-align: center;
         margin-bottom: 1.5rem;
     }
     .nav-bar {
         background: #4F46E5;
-        color: white;
+        color: #FFFFFF;
         padding: 0.6rem 1rem;
         border-radius: 8px;
         margin-bottom: 0.75rem;
         display: flex;
         justify-content: space-between;
     }
-    .nav-bar b { font-size: 1.1rem; }
+    .nav-bar b { font-size: 1.1rem; color: #FFFFFF; }
     .nav-bar .who { color: #C7D2FE; font-style: italic; }
+    .match-title {
+        color: #4F46E5;
+        font-size: 2rem;
+        font-weight: 800;
+        text-align: center;
+        margin: 0.25rem 0 0.5rem 0;
+    }
+    .match-sub {
+        opacity: 0.75;
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    .slot-caption {
+        text-align: center;
+        font-weight: 600;
+        margin-top: 0.4rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -87,7 +104,9 @@ def init_state() -> None:
         "candidates": None,
         "queue": None,
         "queue_index": 0,
-        "flash": None,       # transient message shown once
+        "show_match": False,          # open match modal on next render
+        "matched_profile": None,      # candidate to show in the modal
+        "last_action": None,          # ("like" | "pass", Profile) for undo
     }
     for k, v in defaults.items():
         st.session_state.setdefault(k, v)
@@ -122,6 +141,10 @@ def build_queue() -> list[Profile]:
         c for c in candidates
         if c.id not in matched_ids and c.matches_filters(st.session_state.filters)
     ]
+    # Best matches first, using the compatibility score.
+    me = st.session_state.my_profile
+    if me is not None:
+        queue.sort(key=lambda c: compatibility(me, c), reverse=True)
     st.session_state.queue = queue
     st.session_state.queue_index = 0
     return queue
@@ -179,7 +202,16 @@ def add_match(profile: Profile) -> None:
     if not any(m.id == profile.id for m in st.session_state.matches):
         st.session_state.matches.append(profile)
         save_json(matches_file(u), [m.to_dict() for m in st.session_state.matches])
-        st.session_state.flash = f"Added {profile.name} to your matches."
+        st.session_state.show_match = True
+        st.session_state.matched_profile = profile
+
+
+def remove_match(profile: Profile) -> None:
+    u = st.session_state.current_user
+    st.session_state.matches = [
+        m for m in st.session_state.matches if m.id != profile.id
+    ]
+    save_json(matches_file(u), [m.to_dict() for m in st.session_state.matches])
 
 
 def save_filters(f: Filters) -> None:
@@ -314,11 +346,13 @@ def view_setup() -> None:
         if not name.strip():
             st.error("Please enter your name.")
             return
+        pid = existing.id if existing else str(uuid.uuid4())
+        photo = existing.photo_url if existing and existing.photo_url else avatar_url(pid)
         p = Profile(
-            id=existing.id if existing else str(uuid.uuid4()),
+            id=pid,
             name=name.strip(),
             age=int(age),
-            photo_url="",
+            photo_url=photo,
             email=email.strip(),
             budget=int(budget),
             smoker=bool(smoker),
@@ -380,9 +414,12 @@ def view_filters() -> None:
 def view_swipe() -> None:
     st.title("Swipe")
 
-    if st.session_state.flash:
-        st.success(st.session_state.flash)
-        st.session_state.flash = None
+    # Trigger the match dialog when add_match() has queued one. Clear the flag
+    # immediately so the modal only opens once per match.
+    if st.session_state.show_match and st.session_state.matched_profile is not None:
+        st.session_state.show_match = False
+        _show_match_dialog(st.session_state.my_profile, st.session_state.matched_profile)
+        st.session_state.matched_profile = None
 
     if st.session_state.queue is None:
         with st.spinner("Loading candidates from randomuser.me\u2026"):
@@ -408,10 +445,25 @@ def view_swipe() -> None:
         return
 
     p = queue[idx]
+    me = st.session_state.my_profile
+    score = compatibility(me, p) if me else None
+
     with st.container(border=True):
         if p.photo_url:
-            st.image(p.photo_url, width=280)
-        st.subheader(f"{p.name}, {p.age}")
+            left, mid, right = st.columns([1, 2, 1])
+            with mid:
+                st.image(p.photo_url, use_container_width=True)
+
+        head_cols = st.columns([3, 1])
+        head_cols[0].subheader(f"{p.name}, {p.age}")
+        if score is not None:
+            head_cols[1].markdown(
+                f"<div style='text-align:right;color:#4F46E5;"
+                f"font-weight:700;font-size:1.15rem;padding-top:0.5rem'>"
+                f"{score}% match</div>",
+                unsafe_allow_html=True,
+            )
+
         smoker_txt = "smoker" if p.smoker else "non-smoker"
         pets_txt = "has pets" if p.pets else "no pets"
         st.caption(
@@ -420,19 +472,31 @@ def view_swipe() -> None:
         )
         st.write(p.bio)
 
-    col_pass, col_like = st.columns(2)
+    col_pass, col_undo, col_like = st.columns([1, 1, 1])
     if col_pass.button("Pass", key=f"pass_{p.id}", use_container_width=True):
+        st.session_state.last_action = ("pass", p)
         st.session_state.queue_index += 1
+        st.rerun()
+    undo_disabled = st.session_state.last_action is None or idx == 0
+    if col_undo.button("Undo", key=f"undo_{p.id}", use_container_width=True,
+                       disabled=undo_disabled):
+        kind, prev = st.session_state.last_action
+        if kind == "like":
+            remove_match(prev)
+        st.session_state.last_action = None
+        st.session_state.queue_index = max(0, idx - 1)
         st.rerun()
     if col_like.button("Like", key=f"like_{p.id}", type="primary",
                        use_container_width=True):
         add_match(p)
+        st.session_state.last_action = ("like", p)
         st.session_state.queue_index += 1
         st.rerun()
 
 
 def view_matches() -> None:
     matches = st.session_state.matches
+    me = st.session_state.my_profile
     st.title(f"Your matches ({len(matches)})")
     if not matches:
         st.info("No matches yet. Head to Swipe and like some profiles!")
@@ -440,14 +504,39 @@ def view_matches() -> None:
             go("swipe")
         return
 
-    for m in reversed(matches):
+    sort_by = st.selectbox(
+        "Sort by",
+        ["Most recent", "Compatibility", "Budget (low to high)", "Name", "Age"],
+        index=0,
+    )
+
+    sorted_matches = list(matches)
+    if sort_by == "Most recent":
+        sorted_matches = list(reversed(sorted_matches))
+    elif sort_by == "Compatibility" and me is not None:
+        sorted_matches.sort(key=lambda m: compatibility(me, m), reverse=True)
+    elif sort_by == "Budget (low to high)":
+        sorted_matches.sort(key=lambda m: m.budget)
+    elif sort_by == "Name":
+        sorted_matches.sort(key=lambda m: m.name.lower())
+    elif sort_by == "Age":
+        sorted_matches.sort(key=lambda m: m.age)
+
+    for m in sorted_matches:
+        score = compatibility(me, m) if me else None
         with st.container(border=True):
             cols = st.columns([1, 3])
             with cols[0]:
                 if m.photo_url:
                     st.image(m.photo_url, width=80)
             with cols[1]:
-                st.markdown(f"**{m.name}, {m.age}**")
+                title = f"**{m.name}, {m.age}**"
+                if score is not None:
+                    title += (
+                        f" <span style='color:#4F46E5;font-weight:600'>"
+                        f"\u2022 {score}% match</span>"
+                    )
+                st.markdown(title, unsafe_allow_html=True)
                 smoker_txt = "smoker" if m.smoker else "non-smoker"
                 pets_txt = "has pets" if m.pets else "no pets"
                 st.caption(
@@ -455,6 +544,31 @@ def view_matches() -> None:
                     f"{m.cleanliness}  \u2022  {smoker_txt}  \u2022  {pets_txt}"
                 )
                 st.markdown(f"\U0001f4e7 `{m.email}`")
+
+
+@st.dialog("It's a Match!")
+def _show_match_dialog(my: Profile | None, other: Profile) -> None:
+    other_first = other.name.split()[0] if other.name else "them"
+    st.markdown(
+        f"<div class='match-sub'>You and <b>{other_first}</b> could make "
+        "great roommates.</div>",
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(2)
+    with cols[0]:
+        if my and my.photo_url:
+            st.image(my.photo_url, use_container_width=True)
+        my_first = my.name.split()[0] if (my and my.name) else "You"
+        st.markdown(f"<div class='slot-caption'>{my_first}</div>",
+                    unsafe_allow_html=True)
+    with cols[1]:
+        if other.photo_url:
+            st.image(other.photo_url, use_container_width=True)
+        st.markdown(f"<div class='slot-caption'>{other_first}</div>",
+                    unsafe_allow_html=True)
+    st.write("")
+    if st.button("Keep swiping", type="primary", use_container_width=True):
+        st.rerun()
 
 
 # --------------------------------------------------------------------
