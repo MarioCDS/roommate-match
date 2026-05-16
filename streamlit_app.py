@@ -1,17 +1,4 @@
-"""NOVA Roomie: Streamlit web version.
-
-Run locally:
-    streamlit run streamlit_app.py
-
-Deploy to Streamlit Community Cloud:
-    1. Push this project to GitHub.
-    2. Go to https://share.streamlit.io, click \u201cNew app\u201d.
-    3. Point it at this repo and streamlit_app.py as the entry point.
-
-Note: Streamlit Cloud's filesystem is ephemeral, so user data and matches persist
-only while the server is warm. For an MVP demo this is fine; for production
-you'd swap storage.py for a real database.
-"""
+"""NOVA Roomie - Streamlit app. Run with: streamlit run streamlit_app.py"""
 import uuid
 
 import requests
@@ -51,11 +38,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* No hardcoded page background or text colour, so Streamlit's
-       light/dark theme toggle (top-right menu) works naturally. */
     .stButton > button { width: 100%; }
-    /* Tab labels must stay readable in both themes. Inherit the base
-       text colour and distinguish the active tab by brand color. */
     .stTabs [role="tab"] {
         color: inherit !important;
         opacity: 0.7;
@@ -90,8 +73,6 @@ st.markdown("""
     }
     .nav-bar b { font-size: 1.1rem; color: #FFFFFF; letter-spacing: -0.01em; }
     .nav-bar .who { color: #C7D2FE; font-style: italic; }
-    /* Tighten up native Streamlit button spacing inside the nav row so the
-       five primary nav buttons sit close to each other like a pill bar. */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"] > div {
         gap: 0.25rem;
     }
@@ -100,9 +81,7 @@ st.markdown("""
         font-weight: 600;
         padding: 0.35rem 0.6rem;
     }
-    /* Streamlit shows a small "Press Enter to submit form" hint under every
-       text input inside a form. The submit button makes it obvious, so we
-       hide it to declutter the password field layout. */
+    /* hide the form hint */
     div[data-testid="InputInstructions"] {
         display: none;
     }
@@ -125,11 +104,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-
-# --------------------------------------------------------------------
-# Session state helpers
-# --------------------------------------------------------------------
 
 def init_state():
     defaults = {
@@ -161,8 +135,6 @@ def load_candidates():
         return st.session_state.candidates
     cached = load_json(CANDIDATES_FILE, [])
     profiles = [Profile.from_dict(c) for c in cached] if cached else []
-    # A cache built before we added roles would default every candidate to
-    # "roomie", leaving roomies with an empty queue. Re-fetch in that case.
     if profiles:
         roles = {p.role for p in profiles}
         stale = (
@@ -201,18 +173,12 @@ def build_queue():
     # Best matches first, using the compatibility score.
     if me is not None:
         queue.sort(key=lambda c: compatibility(me, c), reverse=True)
-    # Pin featured candidates (Harold and friends) to the front so they're
-    # easy to find regardless of the user's preferences.
+    # Featured candidates first.
     featured = featured_ids()
     queue.sort(key=lambda c: 0 if c.id in featured else 1)
     st.session_state.queue = queue
     st.session_state.queue_index = 0
     return queue
-
-
-# --------------------------------------------------------------------
-# Auth flow
-# --------------------------------------------------------------------
 
 def login(username):
     st.session_state.current_user = username
@@ -247,10 +213,6 @@ def logout():
     go("auth")
 
 
-# --------------------------------------------------------------------
-# User-scoped state mutations
-# --------------------------------------------------------------------
-
 def save_my_profile(profile):
     u = st.session_state.current_user
     st.session_state.my_profile = profile
@@ -282,10 +244,6 @@ def save_filters(f):
     st.session_state.queue_index = 0
 
 
-# --------------------------------------------------------------------
-# Views
-# --------------------------------------------------------------------
-
 def render_nav():
     if not st.session_state.current_user:
         return
@@ -306,9 +264,6 @@ def render_nav():
         if st.button("Log out", key="nav_logout", use_container_width=True):
             logout()
 
-    # Primary nav: equal-width pills, active view highlighted in brand colour.
-    # Non-Profile buttons are disabled until the user has saved a profile so
-    # they can't start swiping empty.
     nav_items = [
         ("Swipe", "swipe"),
         ("Map", "map"),
@@ -760,8 +715,6 @@ def view_filters():
                 index=CLEANLINESS_OPTS.index(f.cleanliness_pref),
             )
 
-        # Neighborhood filter only tightens the queue for roomies, since only
-        # host listings carry a neighborhood. Hosts can leave it as "any".
         nb_index = (
             NEIGHBORHOOD_OPTS.index(f.neighborhood_pref)
             if f.neighborhood_pref in NEIGHBORHOOD_OPTS else 0
@@ -788,8 +741,6 @@ def view_filters():
 def view_swipe():
     st.title("Swipe", anchor=False)
 
-    # Trigger the match dialog when add_match() has queued one. Clear the flag
-    # immediately so the modal only opens once per match.
     if st.session_state.show_match and st.session_state.matched_profile is not None:
         st.session_state.show_match = False
         _show_match_dialog(st.session_state.my_profile, st.session_state.matched_profile)
@@ -957,8 +908,6 @@ def view_swipe():
         st.session_state.queue_index += 1
         st.rerun()
 
-    # Always-visible refresh so stale caches can be blown away without
-    # needing to reach the empty state first.
     with st.expander("Pool options"):
         if st.button("Refresh candidates from randomuser.me",
                      key="swipe_refresh", use_container_width=True):
@@ -1179,15 +1128,8 @@ def _show_match_dialog(my, other):
         st.rerun()
 
 
-# --------------------------------------------------------------------
-# Main
-# --------------------------------------------------------------------
-
 init_state()
 
-# Guard: a logged-in user without a profile has to complete setup before
-# anything else. Flipping the view here (before render_nav) keeps the nav
-# in sync so the Profile button renders as active.
 if (st.session_state.current_user
         and st.session_state.my_profile is None
         and st.session_state.view not in ("auth", "setup")):

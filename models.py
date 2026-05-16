@@ -19,9 +19,7 @@ CLEANLINESS_LEVELS = ["very tidy", "tidy", "relaxed"]
 ROLES = ["roomie", "host"]
 LEASE_OPTIONS = [1, 3, 6, 12, 24]
 
-# Lisbon neighborhoods we know about. The coords are approximate but good
-# enough for st.map. Kept as a plain dict so the intro-level iteration
-# patterns (for name in NEIGHBORHOODS) work as expected.
+# Lisbon neighborhoods with approximate coordinates for st.map.
 NEIGHBORHOODS = {
     "Alvalade": (38.7516, -9.1443),
     "Arroios": (38.7353, -9.1355),
@@ -68,8 +66,6 @@ class Profile:
     utilities_included: bool = False
     furnished: bool = False
 
-    # --- helpers ----------------------------------------------------
-
     def effective_price(self):
         """Rent for hosts; budget for roomies. Used by filters and scoring."""
         if self.role == "host":
@@ -97,14 +93,10 @@ class Profile:
             return False
         if f.cleanliness_pref != "any" and self.cleanliness != f.cleanliness_pref:
             return False
-        # Neighborhood filter only applies to profiles that actually have one
-        # (i.e. host listings). Roomies have no neighborhood so we skip.
         if (f.neighborhood_pref != "any" and self.neighborhood
                 and self.neighborhood != f.neighborhood_pref):
             return False
         return True
-
-    # --- serialisation ----------------------------------------------
 
     def to_dict(self):
         return asdict(self)
@@ -199,8 +191,6 @@ class Filters:
         return cls(**d)
 
 
-# --- stock photo helpers -------------------------------------------
-
 # Curated Unsplash photo IDs of apartment / interior shots. Picsum returns
 # mostly landscapes, which didn't fit a roommate app, so we use this list
 # instead. All images are CC0.
@@ -243,17 +233,13 @@ def house_photo_url(seed):
 
 
 def house_photo_gallery(seed, n=4):
-    """A list of n different interior photos, deterministic per seed.
-
-    Using random.Random(seed) instead of hash arithmetic keeps the shape of
-    the code closer to what the course teaches (the random module).
-    """
+    """A list of n different interior photos, deterministic per seed."""
     rng = random.Random(seed)
     return [_unsplash_url(pid) for pid in rng.sample(_INTERIOR_PHOTO_IDS, n)]
 
 
 def compatibility(me, other):
-    """A 0-100 score estimating how well ``other`` fits ``me``.
+    """A 0-100 compatibility score.
 
     Lifestyle matches (smoker, schedule, pets, cleanliness) are treated the
     same regardless of role. Price uses each side's effective_price().
@@ -301,9 +287,6 @@ def compatibility(me, other):
         + pets_s * 0.10
     )
     return int(round(total))
-
-
-# --- seed text ------------------------------------------------------
 
 BIOS = [
     "Grad student. I keep the kitchen spotless and cook most nights. Looking for someone respectful and communicative.",

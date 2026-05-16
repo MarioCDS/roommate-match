@@ -1,9 +1,4 @@
-"""Mock authentication: SHA-256 hashed passwords in a local JSON file.
-
-NOT PRODUCTION. There is no salt, no rate limiting, no password-strength
-enforcement. The goal is only to demonstrate a login/signup flow for the
-university project.
-"""
+"""Simple login: SHA-256 hashed passwords in a JSON file."""
 import hashlib
 import string
 
